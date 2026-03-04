@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+
+# Large files not needed for GitHub Pages
+datasets/
+paper/
+notebooks/
+data/results.json
+
+# Conda / Python environments
+*.egg-info/
+.env
+
+# OS
+.DS_Store

@@ -1,0 +1,21 @@
+name: geoxcp_web
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - numpy=1.26.4
+  - pandas=2.2.3
+  - geopandas=1.0.1
+  - matplotlib=3.9.2
+  - scikit-learn=1.5.2
+  - joblib=1.4.2
+  - tqdm=4.67.1
+  - pip
+  - pip:
+    - xgboost==2.1.1
+    - shap==0.46.0
+    - torch==2.2.2
+    - pygam==0.9.1
+    - geoplot==0.5.1
+    - contextily==1.6.2

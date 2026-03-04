@@ -1,0 +1,1653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GeoXCP | Geographically Conformalized Explanations</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --positive: #dc2626;
+      --negative: #2563eb;
+      --uncertainty: #d97706;
+      --coverage: #059669;
+      --bg: #f1f5f9;
+      --sidebar-bg: #f8fafc;
+      --card-bg: #ffffff;
+      --border: #e2e8f0;
+      --text: #1e293b;
+      --text-muted: #64748b;
+      --text-light: #94a3b8;
+      --header-h: 58px;
+      --sidebar-w: 340px;
+      --bottom-h: 260px;
+      --controls-h: 52px;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      font-size: 13px;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── HEADER ── */
+    .site-header {
+      height: var(--header-h);
+      background: #0f172a;
+      display: flex;
+      align-items: center;
+      padding: 0 24px;
+      gap: 16px;
+      flex-shrink: 0;
+      border-bottom: 1px solid #1e293b;
+    }
+
+    .header-logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-badge {
+      background: linear-gradient(135deg, #2563eb, #7c3aed);
+      color: white;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      padding: 5px 10px;
+      border-radius: 6px;
+    }
+
+    .header-title {
+      color: white;
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+
+    .header-subtitle {
+      color: #94a3b8;
+      font-size: 12px;
+      margin-left: 4px;
+    }
+
+    .header-sep { width: 1px; height: 28px; background: #334155; margin: 0 8px; }
+
+    .header-tags { display: flex; gap: 8px; }
+    .tag {
+      background: #1e293b;
+      color: #94a3b8;
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      border: 1px solid #334155;
+    }
+
+    /* ── MAIN LAYOUT ── */
+    .app-body {
+      display: grid;
+      grid-template-columns: var(--sidebar-w) 1fr;
+      flex: 1;
+      overflow: hidden;
+      min-height: 0;
+    }
+
+    /* ── SIDEBAR ── */
+    .sidebar {
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: #cbd5e1 transparent;
+    }
+
+    .sidebar-header {
+      padding: 16px 20px 12px;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      background: var(--sidebar-bg);
+      z-index: 10;
+    }
+
+    .sidebar-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+    }
+
+    .sidebar-desc {
+      font-size: 11.5px;
+      color: var(--text-light);
+      margin-top: 4px;
+      line-height: 1.5;
+    }
+
+    /* Workflow Steps */
+    .workflow { padding: 8px 0; }
+
+    .step {
+      display: flex;
+      gap: 0;
+      position: relative;
+    }
+
+    .step-track {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 44px;
+      flex-shrink: 0;
+      padding-top: 14px;
+    }
+
+    .step-num {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      background: #e2e8f0;
+      color: var(--text-muted);
+      border: 2px solid #cbd5e1;
+      flex-shrink: 0;
+      z-index: 1;
+      transition: all 0.2s;
+    }
+
+    .step.active .step-num {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+    }
+
+    .step-line {
+      width: 2px;
+      flex: 1;
+      background: #e2e8f0;
+      min-height: 16px;
+    }
+
+    .step:last-child .step-line { display: none; }
+
+    .step-body {
+      flex: 1;
+      padding: 12px 16px 14px 4px;
+    }
+
+    .step-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .step-badge {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 3px;
+      background: #f1f5f9;
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
+
+    .step-desc {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      line-height: 1.55;
+      margin-bottom: 6px;
+    }
+
+    .step-stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    .stat-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 3px 8px;
+      font-size: 11px;
+    }
+
+    .stat-label { color: var(--text-muted); }
+    .stat-value { font-weight: 600; color: var(--text); }
+    .stat-value.good { color: var(--coverage); }
+    .stat-value.warn { color: var(--uncertainty); }
+    .stat-value.info { color: var(--primary); }
+
+    /* Step 3: feature highlight box */
+    .feature-highlight {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin-top: 6px;
+    }
+
+    .feature-highlight-title {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+      font-weight: 500;
+    }
+
+    .feature-metric-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 2px 0;
+    }
+
+    .feature-metric-name { font-size: 11.5px; color: var(--text); }
+    .feature-metric-val { font-size: 11.5px; font-weight: 600; }
+
+    /* Divider */
+    .sidebar-divider {
+      height: 1px;
+      background: var(--border);
+      margin: 4px 20px;
+    }
+
+    /* Accuracy Table */
+    .accuracy-section {
+      padding: 12px 16px 20px;
+    }
+
+    .section-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .accuracy-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+    }
+
+    .accuracy-table thead th {
+      text-align: left;
+      padding: 5px 6px;
+      border-bottom: 2px solid var(--border);
+      color: var(--text-muted);
+      font-weight: 600;
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .accuracy-table tbody tr {
+      border-bottom: 1px solid #f1f5f9;
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+
+    .accuracy-table tbody tr:hover { background: #f0f7ff; }
+    .accuracy-table tbody tr.selected { background: #eff6ff; }
+
+    .accuracy-table tbody td {
+      padding: 5px 6px;
+      vertical-align: middle;
+    }
+
+    .feature-name-cell {
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .feature-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .coverage-bar-wrap {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .coverage-bar {
+      height: 6px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+
+    .coverage-val { font-weight: 600; }
+
+    /* ── MAP PANEL ── */
+    .map-panel {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* Controls bar */
+    .map-controls {
+      height: var(--controls-h);
+      background: white;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 16px;
+      flex-shrink: 0;
+    }
+
+    .control-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .control-label {
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    .feature-select {
+      appearance: none;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 28px 6px 10px;
+      font-size: 12.5px;
+      font-family: inherit;
+      color: var(--text);
+      cursor: pointer;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2394a3b8'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      transition: border-color 0.15s;
+      min-width: 170px;
+    }
+
+    .feature-select:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+
+    .metric-btns { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+
+    .metric-btn {
+      background: white;
+      border: none;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-family: inherit;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-right: 1px solid var(--border);
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+
+    .metric-btn:last-child { border-right: none; }
+
+    .metric-btn:hover { background: #f8fafc; color: var(--text); }
+
+    .metric-btn.active {
+      background: var(--primary);
+      color: white;
+    }
+
+    .controls-spacer { flex: 1; }
+
+    .point-info-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11.5px;
+      color: var(--text-muted);
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 10px;
+    }
+
+    .info-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #cbd5e1;
+    }
+
+    .info-dot.selected { background: var(--uncertainty); }
+
+    /* Map */
+    #map {
+      flex: 1;
+      min-height: 0;
+    }
+
+    /* Legend */
+    .map-legend {
+      background: white;
+      border-top: 1px solid var(--border);
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      height: 46px;
+      flex-shrink: 0;
+    }
+
+    .legend-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    .legend-gradient-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+    }
+
+    .legend-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    #legend-gradient-svg { flex: 1; max-width: 300px; height: 20px; }
+
+    .legend-sep { width: 1px; height: 24px; background: var(--border); }
+
+    .legend-size-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .size-circles {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .size-circle {
+      border-radius: 50%;
+      background: #94a3b8;
+      border: 1px solid #64748b;
+    }
+
+    /* ── BOTTOM PANEL ── */
+    .bottom-panel {
+      height: var(--bottom-h);
+      background: white;
+      border-top: 2px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+
+    .bottom-tabs {
+      display: flex;
+      gap: 0;
+      border-bottom: 1px solid var(--border);
+      padding: 0 16px;
+      height: 40px;
+      align-items: flex-end;
+    }
+
+    .tab-btn {
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      padding: 0 14px 8px;
+      font-size: 12.5px;
+      font-family: inherit;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s;
+      margin-bottom: -1px;
+      white-space: nowrap;
+    }
+
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+
+    .tab-content {
+      flex: 1;
+      overflow: hidden;
+      display: flex;
+    }
+
+    .chart-pane {
+      flex: 1;
+      padding: 12px 20px 8px;
+      overflow: hidden;
+    }
+
+    .chart-pane.hidden { display: none; }
+
+    /* Leaflet overrides */
+    .leaflet-popup-content-wrapper {
+      border-radius: 8px;
+      font-family: 'Inter', sans-serif;
+      font-size: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    }
+
+    .leaflet-popup-content { margin: 10px 14px; }
+
+    .popup-header {
+      font-weight: 600;
+      font-size: 13px;
+      margin-bottom: 6px;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .popup-price {
+      background: #f0fdf4;
+      color: #166534;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+
+    .popup-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 2px 0;
+      border-bottom: 1px solid #f1f5f9;
+    }
+
+    .popup-row:last-child { border-bottom: none; }
+    .popup-key { color: var(--text-muted); }
+    .popup-val { font-weight: 600; }
+
+    /* No data overlay */
+    .no-data-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255,255,255,0.95);
+      z-index: 1000;
+      gap: 12px;
+      text-align: center;
+      padding: 20px;
+    }
+
+    .no-data-icon { font-size: 40px; }
+
+    .no-data-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .no-data-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      max-width: 400px;
+      line-height: 1.6;
+    }
+
+    .no-data-code {
+      background: #1e293b;
+      color: #a5f3fc;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════ HEADER ═══════════════════════ -->
+<header class="site-header">
+  <div class="header-logo">
+    <span class="logo-badge">GeoXCP</span>
+    <div>
+      <div class="header-title">Geographically Conformalized Explanations</div>
+      <span class="header-subtitle">for Black-Box Spatial Models</span>
+    </div>
+  </div>
+  <div class="header-sep"></div>
+  <div class="header-tags">
+    <span class="tag">Seattle House Price</span>
+    <span class="tag">n=300 test points</span>
+    <span class="tag">90% coverage target</span>
+    <span class="tag">10 features</span>
+  </div>
+</header>
+
+<!-- ═══════════════════════ MAIN BODY ═══════════════════════ -->
+<div class="app-body">
+
+  <!-- ─── LEFT SIDEBAR ─── -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-title">Workflow</div>
+      <div class="sidebar-desc">How GeoXCP generates uncertainty-aware spatial explanations</div>
+    </div>
+
+    <div class="workflow">
+
+      <!-- Step 1 -->
+      <div class="step active">
+        <div class="step-track">
+          <div class="step-num">1</div>
+          <div class="step-line"></div>
+        </div>
+        <div class="step-body">
+          <div class="step-title">Black-box Prediction Model
+            <span class="step-badge">XGBoost</span>
+          </div>
+          <div class="step-desc">
+            An XGBoost regressor is trained on 2,400 Seattle house sales to predict prices.
+            Features include structural attributes (sqft, bathrooms, grade) and location (lat/lon).
+          </div>
+          <div class="step-stats" id="stats-model">
+            <span class="stat-pill"><span class="stat-label">Train R²</span><span class="stat-value info" id="train-r2">—</span></span>
+            <span class="stat-pill"><span class="stat-label">Test R²</span><span class="stat-value good" id="test-r2">—</span></span>
+            <span class="stat-pill"><span class="stat-label">Test RMSE</span><span class="stat-value" id="test-rmse">—</span></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 2 -->
+      <div class="step active">
+        <div class="step-track">
+          <div class="step-num">2</div>
+          <div class="step-line"></div>
+        </div>
+        <div class="step-body">
+          <div class="step-title">SHAP Values
+            <span class="step-badge">TreeSHAP</span>
+          </div>
+          <div class="step-desc">
+            SHAP (SHapley Additive exPlanations) values measure each feature's contribution to a
+            prediction. TreeSHAP exploits the tree structure for exact, efficient computation
+            across train/calibration/test splits.
+          </div>
+          <div class="step-stats">
+            <span class="stat-pill"><span class="stat-label">Train</span><span class="stat-value info">2,400 pts</span></span>
+            <span class="stat-pill"><span class="stat-label">Calib</span><span class="stat-value warn">300 pts</span></span>
+            <span class="stat-pill"><span class="stat-label">Test</span><span class="stat-value">300 pts</span></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 3 -->
+      <div class="step active">
+        <div class="step-track">
+          <div class="step-num">3</div>
+          <div class="step-line"></div>
+        </div>
+        <div class="step-body">
+          <div class="step-title">SHAP Predictor
+            <span class="step-badge">MLP Regression</span>
+          </div>
+          <div class="step-desc">
+            A multi-layer perceptron (MLP) learns to predict SHAP values from house features + model
+            output. This enables SHAP prediction at any new location without re-running the full
+            SHAP computation.
+          </div>
+          <div class="feature-highlight">
+            <div class="feature-highlight-title">Selected feature performance</div>
+            <div class="feature-metric-row">
+              <span class="feature-metric-name">Feature</span>
+              <span class="feature-metric-val" id="fh-feature">—</span>
+            </div>
+            <div class="feature-metric-row">
+              <span class="feature-metric-name">R² (test)</span>
+              <span class="feature-metric-val" id="fh-r2">—</span>
+            </div>
+            <div class="feature-metric-row">
+              <span class="feature-metric-name">RMSE</span>
+              <span class="feature-metric-val" id="fh-rmse">—</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 4 -->
+      <div class="step active">
+        <div class="step-track">
+          <div class="step-num">4</div>
+          <div class="step-line"></div>
+        </div>
+        <div class="step-body">
+          <div class="step-title">Geo-Conformal Prediction
+            <span class="step-badge">GeoCP</span>
+          </div>
+          <div class="step-desc">
+            Conformal prediction provides distribution-free coverage guarantees. Here, calibration
+            residuals are weighted by a Gaussian kernel (bandwidth=0.15°) based on geographic
+            distance, so uncertainty adapts to local data density.
+          </div>
+          <div class="step-stats">
+            <span class="stat-pill"><span class="stat-label">Bandwidth</span><span class="stat-value">0.15°</span></span>
+            <span class="stat-pill"><span class="stat-label">Coverage target</span><span class="stat-value good">90%</span></span>
+            <span class="stat-pill"><span class="stat-label">α</span><span class="stat-value">0.10</span></span>
+          </div>
+          <div class="feature-highlight" style="margin-top:6px">
+            <div class="feature-highlight-title">Current feature uncertainty</div>
+            <div class="feature-metric-row">
+              <span class="feature-metric-name">Global uncertainty ±</span>
+              <span class="feature-metric-val info" id="fh-uncertainty">—</span>
+            </div>
+            <div class="feature-metric-row">
+              <span class="feature-metric-name">Coverage probability</span>
+              <span class="feature-metric-val" id="fh-coverage">—</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 5 -->
+      <div class="step active">
+        <div class="step-track">
+          <div class="step-num">5</div>
+          <div class="step-line"></div>
+        </div>
+        <div class="step-body">
+          <div class="step-title">Uncertainty-Aware Explanations
+            <span class="step-badge">GeoXCP</span>
+          </div>
+          <div class="step-desc">
+            Each prediction is explained by SHAP values with geographically-calibrated confidence
+            intervals. Larger intervals reflect greater local uncertainty in the SHAP regression.
+            The map shows how explanation uncertainty varies spatially.
+          </div>
+          <div class="step-stats">
+            <span class="stat-pill"><span class="stat-label">Interpretation</span>
+              <span class="stat-value">SHAP ± geo-uncertainty</span></span>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- end .workflow -->
+
+    <div class="sidebar-divider"></div>
+
+    <!-- Accuracy Table -->
+    <div class="accuracy-section">
+      <div class="section-title">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <rect x="1" y="5" width="10" height="1.5" rx="0.75" fill="#64748b"/>
+          <rect x="1" y="2" width="6" height="1.5" rx="0.75" fill="#64748b"/>
+          <rect x="1" y="8" width="8" height="1.5" rx="0.75" fill="#64748b"/>
+        </svg>
+        Feature Accuracy Summary
+      </div>
+      <table class="accuracy-table" id="accuracy-table">
+        <thead>
+          <tr>
+            <th>Feature</th>
+            <th>Coverage</th>
+            <th>R²</th>
+            <th title="Global uncertainty">Uncert.</th>
+          </tr>
+        </thead>
+        <tbody id="accuracy-tbody"></tbody>
+      </table>
+    </div>
+
+  </aside><!-- end .sidebar -->
+
+  <!-- ─── MAP PANEL ─── -->
+  <main class="map-panel">
+
+    <!-- Controls -->
+    <div class="map-controls">
+      <div class="control-group">
+        <label class="control-label" for="feature-select">Feature</label>
+        <select class="feature-select" id="feature-select"></select>
+      </div>
+
+      <div class="control-group">
+        <span class="control-label">Show</span>
+        <div class="metric-btns">
+          <button class="metric-btn active" data-metric="geo_uncertainty">Geo Uncertainty</button>
+          <button class="metric-btn" data-metric="shap">SHAP Value</button>
+          <button class="metric-btn" data-metric="pred">Predicted SHAP</button>
+        </div>
+      </div>
+
+      <div class="controls-spacer"></div>
+
+      <div class="point-info-badge" id="point-info-badge">
+        <span class="info-dot" id="info-dot"></span>
+        <span id="point-info-text">Click a point to explore</span>
+      </div>
+    </div>
+
+    <!-- Map -->
+    <div id="map" style="position:relative">
+      <div id="no-data-overlay" class="no-data-overlay">
+        <div class="no-data-icon">🗺️</div>
+        <div class="no-data-title">Data not loaded</div>
+        <div class="no-data-desc">
+          Run the data generation script first, then reload the page.
+        </div>
+        <div class="no-data-code">python generate_data.py</div>
+      </div>
+    </div>
+
+    <!-- Legend -->
+    <div class="map-legend">
+      <span class="legend-title" id="legend-title">Geo Uncertainty</span>
+      <div class="legend-gradient-wrap">
+        <span class="legend-label" id="legend-min">0</span>
+        <svg id="legend-gradient-svg">
+          <defs>
+            <linearGradient id="legend-grad" x1="0" y1="0" x2="1" y2="0">
+              <!-- stops filled by JS -->
+            </linearGradient>
+          </defs>
+          <rect x="0" y="4" width="100%" height="12" rx="3" fill="url(#legend-grad)"/>
+        </svg>
+        <span class="legend-label" id="legend-max">max</span>
+      </div>
+      <div class="legend-sep"></div>
+      <div class="legend-size-wrap">
+        <span class="legend-title">Size = |SHAP|</span>
+        <div class="size-circles">
+          <div class="size-circle" style="width:6px;height:6px"></div>
+          <div class="size-circle" style="width:10px;height:10px"></div>
+          <div class="size-circle" style="width:14px;height:14px"></div>
+        </div>
+        <span class="legend-label">small → large</span>
+      </div>
+    </div>
+
+  </main>
+
+</div><!-- end .app-body -->
+
+<!-- ═══════════════════════ BOTTOM PANEL ═══════════════════════ -->
+<div class="bottom-panel">
+  <div class="bottom-tabs">
+    <button class="tab-btn active" data-tab="summary">Feature Importance Summary</button>
+    <button class="tab-btn" data-tab="detail">Point Details</button>
+  </div>
+  <div class="tab-content">
+    <div class="chart-pane" id="pane-summary">
+      <svg id="chart-summary" style="width:100%;height:100%"></svg>
+    </div>
+    <div class="chart-pane hidden" id="pane-detail">
+      <svg id="chart-detail" style="width:100%;height:100%"></svg>
+    </div>
+  </div>
+</div>
+
+<!-- Scripts: data first, then libraries, then app -->
+<script src="data/results.js" onerror="window._dataLoadError=true"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+
+<script>
+// ╔══════════════════════════════════════════════════════════╗
+// ║              GeoXCP Interactive Application              ║
+// ╚══════════════════════════════════════════════════════════╝
+
+const App = (() => {
+  // ── State ──────────────────────────────────────────────
+  let data = null;
+  let leafletMap = null;
+  let markers = [];
+  let selectedMarker = null;
+  let currentFeature = 'sqft_living';
+  let currentMetric = 'geo_uncertainty';
+  let currentTab = 'summary';
+  let selectedPoint = null;
+
+  // Feature display names (fallback if not in data)
+  const FEATURE_LABELS = {
+    bathrooms: 'Bathrooms', sqft_living: 'Living Area (sqft)',
+    sqft_lot: 'Lot Area (sqft)', grade: 'Grade',
+    condition: 'Condition', waterfront: 'Waterfront',
+    view: 'View', age: 'Age (years)',
+    lon: 'Longitude', lat: 'Latitude'
+  };
+
+  // Feature accent colors (for table dots)
+  const FEATURE_COLORS = [
+    '#2563eb','#dc2626','#059669','#d97706','#7c3aed',
+    '#db2777','#0891b2','#65a30d','#9a3412','#475569'
+  ];
+
+  // ── Init ───────────────────────────────────────────────
+  function init() {
+    // Check if data is available
+    if (typeof window.GeoXCPData === 'undefined' || window._dataLoadError) {
+      console.warn('GeoXCPData not found. Please run generate_data.py first.');
+      return;
+    }
+
+    data = window.GeoXCPData;
+    document.getElementById('no-data-overlay').style.display = 'none';
+
+    currentFeature = data.features.includes('sqft_living') ? 'sqft_living' : data.features[0];
+
+    initMap();
+    initControls();
+    populateSidebar();
+    renderAccuracyTable();
+    renderSummaryChart();
+  }
+
+  // ── Map initialization ─────────────────────────────────
+  function initMap() {
+    leafletMap = L.map('map', {
+      center: [47.535, -122.22],
+      zoom: 11,
+      zoomControl: true,
+      attributionControl: true
+    });
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '© <a href="https://www.openstreetmap.org/">OpenStreetMap</a> © <a href="https://carto.com/">CARTO</a>',
+      subdomains: 'abcd',
+      maxZoom: 19
+    }).addTo(leafletMap);
+
+    renderMarkers();
+  }
+
+  // ── Controls initialization ────────────────────────────
+  function initControls() {
+    const featureSelect = document.getElementById('feature-select');
+    const labels = data.feature_labels || FEATURE_LABELS;
+
+    data.features.forEach(f => {
+      const opt = document.createElement('option');
+      opt.value = f;
+      opt.textContent = labels[f] || f;
+      if (f === currentFeature) opt.selected = true;
+      featureSelect.appendChild(opt);
+    });
+
+    featureSelect.addEventListener('change', e => {
+      currentFeature = e.target.value;
+      onFeatureChange();
+    });
+
+    document.querySelectorAll('.metric-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.metric-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentMetric = btn.dataset.metric;
+        renderMarkers();
+        updateSidebarFeature();
+      });
+    });
+
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentTab = btn.dataset.tab;
+        document.getElementById('pane-summary').classList.toggle('hidden', currentTab !== 'summary');
+        document.getElementById('pane-detail').classList.toggle('hidden', currentTab !== 'detail');
+        if (currentTab === 'summary') renderSummaryChart();
+        if (currentTab === 'detail' && selectedPoint) renderDetailChart(selectedPoint);
+      });
+    });
+  }
+
+  function onFeatureChange() {
+    renderMarkers();
+    updateSidebarFeature();
+    highlightTableRow();
+    if (currentTab === 'detail' && selectedPoint) renderDetailChart(selectedPoint);
+    if (currentTab === 'summary') renderSummaryChart();
+  }
+
+  // ── Sidebar population ─────────────────────────────────
+  function populateSidebar() {
+    const m = data.meta;
+    if (m) {
+      setText('train-r2', fmt2(m.train_r2));
+      setText('test-r2', fmt2(m.test_r2));
+      setText('test-rmse', fmt2(m.test_rmse));
+    }
+    updateSidebarFeature();
+  }
+
+  function updateSidebarFeature() {
+    const acc = data.accuracy[currentFeature];
+    const labels = data.feature_labels || FEATURE_LABELS;
+    if (acc) {
+      setText('fh-feature', labels[currentFeature] || currentFeature);
+      setText('fh-r2', fmt2(acc.R2));
+      setText('fh-rmse', fmt2(acc.RMSE));
+      const cov = acc.coverage_probability;
+      const covEl = document.getElementById('fh-coverage');
+      covEl.textContent = `${(cov*100).toFixed(1)}%`;
+      covEl.className = 'feature-metric-val ' + (cov >= 0.85 ? 'good' : (cov >= 0.7 ? 'warn' : 'danger'));
+      const unc = data.global_uncertainty[currentFeature];
+      setText('fh-uncertainty', unc !== undefined ? `±${fmt2(unc)}` : '—');
+    }
+  }
+
+  function highlightTableRow() {
+    document.querySelectorAll('#accuracy-tbody tr').forEach(tr => {
+      tr.classList.toggle('selected', tr.dataset.feature === currentFeature);
+    });
+  }
+
+  // ── Accuracy Table ─────────────────────────────────────
+  function renderAccuracyTable() {
+    const tbody = document.getElementById('accuracy-tbody');
+    const labels = data.feature_labels || FEATURE_LABELS;
+
+    data.features.forEach((feature, i) => {
+      const acc = data.accuracy[feature];
+      const unc = data.global_uncertainty[feature];
+      const cov = acc.coverage_probability;
+      const covPct = (cov * 100).toFixed(0);
+      const covColor = cov >= 0.85 ? '#059669' : (cov >= 0.7 ? '#d97706' : '#dc2626');
+
+      const tr = document.createElement('tr');
+      tr.dataset.feature = feature;
+      if (feature === currentFeature) tr.classList.add('selected');
+
+      tr.innerHTML = `
+        <td>
+          <div class="feature-name-cell">
+            <span class="feature-dot" style="background:${FEATURE_COLORS[i]}"></span>
+            <span style="font-size:11.5px">${labels[feature] || feature}</span>
+          </div>
+        </td>
+        <td>
+          <div class="coverage-bar-wrap">
+            <div class="coverage-bar" style="width:${Math.round(cov*36)}px;background:${covColor}22;border:1px solid ${covColor}"></div>
+            <span class="coverage-val" style="color:${covColor};font-size:11px">${covPct}%</span>
+          </div>
+        </td>
+        <td style="font-size:11px;font-weight:500">${fmt2(acc.R2)}</td>
+        <td style="font-size:11px;color:#d97706;font-weight:500">${unc !== undefined ? '±'+fmt2(unc) : '—'}</td>
+      `;
+
+      tr.addEventListener('click', () => {
+        currentFeature = feature;
+        document.getElementById('feature-select').value = feature;
+        onFeatureChange();
+      });
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  // ── Color Scales ───────────────────────────────────────
+  function getColorScale(metric, values) {
+    if (metric === 'geo_uncertainty') {
+      const max = d3.max(values);
+      return d3.scaleSequential([0, max || 1])
+        .interpolator(d3.interpolateYlOrRd);
+    } else {
+      // Diverging for SHAP / pred
+      const absMax = d3.max(values.map(Math.abs)) || 1;
+      return d3.scaleDiverging([-absMax, 0, absMax])
+        .interpolator(t => d3.interpolateRdBu(1 - t)); // red=positive, blue=negative
+    }
+  }
+
+  function getMetricValue(point, feature, metric) {
+    const f = point.features[feature];
+    if (metric === 'geo_uncertainty') return f.geo_uncertainty;
+    if (metric === 'shap') return f.shap;
+    if (metric === 'pred') return f.pred;
+    return f.geo_uncertainty;
+  }
+
+  // ── Render Markers ─────────────────────────────────────
+  function renderMarkers() {
+    // Remove existing markers
+    markers.forEach(m => m.remove());
+    markers = [];
+
+    const values = data.points.map(p => getMetricValue(p, currentFeature, currentMetric));
+    const absShap = data.points.map(p => p.features[currentFeature].shap_abs);
+    const colorScale = getColorScale(currentMetric, values);
+    const maxShap = d3.max(absShap) || 1;
+
+    function sizeScale(v) {
+      return 4 + (v / maxShap) * 10;
+    }
+
+    data.points.forEach((point, idx) => {
+      const val = values[idx];
+      const color = colorScale(val);
+      const radius = sizeScale(absShap[idx]);
+      const labels = data.feature_labels || FEATURE_LABELS;
+      const fData = point.features[currentFeature];
+
+      const marker = L.circleMarker([point.lat, point.lon], {
+        radius: radius,
+        fillColor: color,
+        color: '#374151',
+        weight: 0.6,
+        opacity: 0.9,
+        fillOpacity: 0.78
+      }).addTo(leafletMap);
+
+      // Tooltip on hover
+      marker.bindTooltip(`
+        <div class="popup-header">
+          <span>${labels[currentFeature] || currentFeature}</span>
+          <span class="popup-price">${fmtPrice(point.price)}</span>
+        </div>
+        <div class="popup-row">
+          <span class="popup-key">Value</span>
+          <span class="popup-val">${fmtVal(fData.value, currentFeature)}</span>
+        </div>
+        <div class="popup-row">
+          <span class="popup-key">SHAP</span>
+          <span class="popup-val" style="color:${fData.shap>=0?'#dc2626':'#2563eb'}">${fData.shap>=0?'+':''}${fmt2(fData.shap)}</span>
+        </div>
+        <div class="popup-row">
+          <span class="popup-key">Geo Uncertainty</span>
+          <span class="popup-val" style="color:#d97706">±${fmt2(fData.geo_uncertainty)}</span>
+        </div>
+      `, { sticky: false, opacity: 0.97, permanent: false });
+
+      marker.on('click', () => {
+        marker.closeTooltip();
+        selectPoint(point, idx, marker);
+      });
+      markers.push(marker);
+    });
+
+    updateLegend(colorScale, currentMetric, d3.extent(values));
+  }
+
+  // ── Select point ───────────────────────────────────────
+  function selectPoint(point, idx, marker) {
+    // Reset previous selection
+    if (selectedMarker) {
+      selectedMarker.setStyle({ weight: 0.6, color: '#374151' });
+    }
+
+    selectedMarker = marker;
+    marker.setStyle({ weight: 2.5, color: '#f59e0b' });
+    selectedPoint = point;
+
+    // Update info badge
+    document.getElementById('info-dot').className = 'info-dot selected';
+    document.getElementById('point-info-text').textContent =
+      `Point #${idx+1} | ${fmtPrice(point.price)} | (${fmt2(point.lat)}°N, ${fmt2(Math.abs(point.lon))}°W)`;
+
+    // Switch to detail tab
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector('[data-tab="detail"]').classList.add('active');
+    currentTab = 'detail';
+    document.getElementById('pane-summary').classList.add('hidden');
+    document.getElementById('pane-detail').classList.remove('hidden');
+
+    renderDetailChart(point);
+  }
+
+  // ── Legend ─────────────────────────────────────────────
+  function updateLegend(colorScale, metric, [minV, maxV]) {
+    const metricTitles = {
+      geo_uncertainty: 'Geo Uncertainty',
+      shap: 'SHAP Value',
+      pred: 'Predicted SHAP'
+    };
+
+    setText('legend-title', `${metricTitles[metric] || metric} — ${(data.feature_labels||FEATURE_LABELS)[currentFeature] || currentFeature}`);
+
+    // Build gradient stops
+    const N = 20;
+    const grad = document.getElementById('legend-grad');
+    grad.innerHTML = '';
+    d3.range(N + 1).forEach(i => {
+      const t = i / N;
+      const v = minV + t * (maxV - minV);
+      const stop = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+      stop.setAttribute('offset', `${(t*100).toFixed(1)}%`);
+      stop.setAttribute('stop-color', colorScale(v));
+      grad.appendChild(stop);
+    });
+
+    setText('legend-min', metric === 'geo_uncertainty' ? '0' : `${fmt2(minV)}`);
+    setText('legend-max', fmt2(maxV));
+  }
+
+  // ── Summary Chart ──────────────────────────────────────
+  function renderSummaryChart() {
+    if (!data) return;
+
+    const svg = d3.select('#chart-summary');
+    svg.selectAll('*').remove();
+
+    const el = document.getElementById('pane-summary');
+    const W = el.clientWidth || 800;
+    const H = el.clientHeight || 160;
+
+    const margin = { top: 10, right: 160, bottom: 30, left: 120 };
+    const w = W - margin.left - margin.right;
+    const h = H - margin.top - margin.bottom;
+
+    if (w <= 0 || h <= 0) return;
+
+    const labels = data.feature_labels || FEATURE_LABELS;
+
+    // Sort features by mean |SHAP|
+    const featureData = data.features.map((f, i) => ({
+      feature: f,
+      label: labels[f] || f,
+      meanAbsShap: data.mean_abs_shap[f] || 0,
+      uncertainty: data.global_uncertainty[f] || 0,
+      color: FEATURE_COLORS[i]
+    })).sort((a, b) => a.meanAbsShap - b.meanAbsShap);
+
+    const maxVal = d3.max(featureData, d => d.meanAbsShap + d.uncertainty);
+
+    const x = d3.scaleLinear().domain([0, maxVal * 1.05]).range([0, w]);
+    const y = d3.scaleBand().domain(featureData.map(d => d.label)).range([0, h]).padding(0.2);
+
+    const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+    // Grid lines
+    g.append('g').attr('class', 'grid')
+      .call(d3.axisBottom(x).tickSize(h).ticks(5).tickFormat(''))
+      .call(gEl => {
+        gEl.select('.domain').remove();
+        gEl.selectAll('.tick line').attr('stroke', '#f1f5f9').attr('stroke-width', 1);
+      });
+
+    // Bars (mean |SHAP|)
+    g.selectAll('.bar-shap')
+      .data(featureData)
+      .join('rect')
+      .attr('class', 'bar-shap')
+      .attr('x', 0)
+      .attr('y', d => y(d.label))
+      .attr('width', d => x(d.meanAbsShap))
+      .attr('height', y.bandwidth())
+      .attr('rx', 3)
+      .attr('fill', d => d.color)
+      .attr('opacity', d => d.feature === currentFeature ? 1 : 0.55)
+      .attr('stroke', d => d.feature === currentFeature ? '#0f172a' : 'none')
+      .attr('stroke-width', 1.5)
+      .style('cursor', 'pointer')
+      .on('click', (event, d) => {
+        currentFeature = d.feature;
+        document.getElementById('feature-select').value = d.feature;
+        onFeatureChange();
+      })
+      .on('mouseover', function(event, d) {
+        d3.select(this).attr('opacity', 1);
+      })
+      .on('mouseout', function(event, d) {
+        d3.select(this).attr('opacity', d.feature === currentFeature ? 1 : 0.55);
+      });
+
+    // Uncertainty bars (extend beyond the SHAP bar)
+    g.selectAll('.bar-unc')
+      .data(featureData)
+      .join('rect')
+      .attr('class', 'bar-unc')
+      .attr('x', d => x(d.meanAbsShap))
+      .attr('y', d => y(d.label) + y.bandwidth() * 0.2)
+      .attr('width', d => x(d.uncertainty))
+      .attr('height', y.bandwidth() * 0.6)
+      .attr('rx', 2)
+      .attr('fill', '#f59e0b')
+      .attr('opacity', 0.6);
+
+    // Labels
+    g.selectAll('.bar-label')
+      .data(featureData)
+      .join('text')
+      .attr('class', 'bar-label')
+      .attr('x', d => x(d.meanAbsShap + d.uncertainty) + 6)
+      .attr('y', d => y(d.label) + y.bandwidth() / 2 + 4)
+      .attr('font-size', 11)
+      .attr('fill', '#475569')
+      .text(d => `${fmt2(d.meanAbsShap)} ±${fmt2(d.uncertainty)}`);
+
+    // Y axis (feature names)
+    g.append('g')
+      .call(d3.axisLeft(y).tickSize(0))
+      .call(gEl => {
+        gEl.select('.domain').remove();
+        gEl.selectAll('.tick text')
+          .attr('font-size', 11.5)
+          .attr('fill', d => {
+            const feat = featureData.find(f => f.label === d);
+            return feat && feat.feature === currentFeature ? '#0f172a' : '#475569';
+          })
+          .attr('font-weight', d => {
+            const feat = featureData.find(f => f.label === d);
+            return feat && feat.feature === currentFeature ? '600' : '400';
+          });
+      });
+
+    // X axis
+    g.append('g')
+      .attr('transform', `translate(0,${h})`)
+      .call(d3.axisBottom(x).ticks(5).tickFormat(d => fmt2(d)))
+      .call(gEl => {
+        gEl.select('.domain').attr('stroke', '#e2e8f0');
+        gEl.selectAll('.tick text').attr('font-size', 10.5).attr('fill', '#94a3b8');
+        gEl.selectAll('.tick line').attr('stroke', '#e2e8f0');
+      });
+
+    // X axis label
+    g.append('text')
+      .attr('x', w / 2)
+      .attr('y', h + 26)
+      .attr('text-anchor', 'middle')
+      .attr('font-size', 11)
+      .attr('fill', '#94a3b8')
+      .text('mean |SHAP Value|');
+
+    // Legend
+    const legX = w + 10, legY = 5;
+    const legendItems = [
+      { color: '#6b7280', label: 'mean |SHAP|' },
+      { color: '#f59e0b', opacity: 0.6, label: 'Global uncertainty' }
+    ];
+    legendItems.forEach((item, i) => {
+      g.append('rect')
+        .attr('x', legX).attr('y', legY + i * 18).attr('width', 12).attr('height', 10).attr('rx', 2)
+        .attr('fill', item.color).attr('opacity', item.opacity || 1);
+      g.append('text')
+        .attr('x', legX + 16).attr('y', legY + i * 18 + 9)
+        .attr('font-size', 10.5).attr('fill', '#64748b').text(item.label);
+    });
+  }
+
+  // ── Detail Chart (point SHAP with error bars) ──────────
+  function renderDetailChart(point) {
+    if (!data || !point) return;
+
+    const svg = d3.select('#chart-detail');
+    svg.selectAll('*').remove();
+
+    const el = document.getElementById('pane-detail');
+    const W = el.clientWidth || 800;
+    const H = el.clientHeight || 160;
+
+    const margin = { top: 10, right: 20, bottom: 30, left: 140 };
+    const w = W - margin.left - margin.right;
+    const h = H - margin.top - margin.bottom;
+
+    if (w <= 0 || h <= 0) return;
+
+    const labels = data.feature_labels || FEATURE_LABELS;
+
+    const featureData = data.features.map((f, i) => {
+      const fd = point.features[f];
+      return {
+        feature: f,
+        label: `${labels[f] || f} = ${fmtVal(fd.value, f)}`,
+        shap: fd.shap,
+        geo_uncertainty: fd.geo_uncertainty,
+        pred: fd.pred,
+        color: FEATURE_COLORS[i]
+      };
+    });
+
+    // Sort by SHAP magnitude
+    featureData.sort((a, b) => Math.abs(a.shap) - Math.abs(b.shap));
+
+    const allBounds = featureData.flatMap(d => [d.shap - d.geo_uncertainty, d.shap + d.geo_uncertainty]);
+    const maxAbs = Math.max(Math.abs(d3.min(allBounds)), Math.abs(d3.max(allBounds))) * 1.15 || 1;
+
+    const x = d3.scaleLinear().domain([-maxAbs, maxAbs]).range([0, w]);
+    const y = d3.scaleBand().domain(featureData.map(d => d.label)).range([0, h]).padding(0.18);
+
+    const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+    // Zero line
+    g.append('line')
+      .attr('x1', x(0)).attr('x2', x(0)).attr('y1', 0).attr('y2', h)
+      .attr('stroke', '#94a3b8').attr('stroke-width', 1.5).attr('stroke-dasharray', '3,3');
+
+    // Highlight background for current feature row
+    g.selectAll('.row-highlight')
+      .data(featureData.filter(d => d.feature === currentFeature))
+      .join('rect')
+      .attr('class', 'row-highlight')
+      .attr('x', -margin.left + 4)
+      .attr('y', d => y(d.label) - 1)
+      .attr('width', W - 8)
+      .attr('height', y.bandwidth() + 2)
+      .attr('rx', 3)
+      .attr('fill', '#fffbeb')
+      .attr('stroke', '#f59e0b')
+      .attr('stroke-width', 1)
+      .attr('opacity', 0.6);
+
+    // Bars
+    g.selectAll('.shap-bar')
+      .data(featureData)
+      .join('rect')
+      .attr('class', 'shap-bar')
+      .attr('x', d => x(Math.min(0, d.shap)))
+      .attr('y', d => y(d.label))
+      .attr('width', d => Math.abs(x(d.shap) - x(0)))
+      .attr('height', y.bandwidth())
+      .attr('rx', 2)
+      .attr('fill', d => d.shap >= 0 ? '#dc2626' : '#2563eb')
+      .attr('opacity', d => d.feature === currentFeature ? 0.92 : 0.72);
+
+    // Uncertainty intervals (error bars)
+    const bw = y.bandwidth();
+    const ew = 0.3;
+
+    g.selectAll('.err-line')
+      .data(featureData)
+      .join('line')
+      .attr('x1', d => x(d.shap - d.geo_uncertainty))
+      .attr('x2', d => x(d.shap + d.geo_uncertainty))
+      .attr('y1', d => y(d.label) + bw / 2)
+      .attr('y2', d => y(d.label) + bw / 2)
+      .attr('stroke', '#374151').attr('stroke-width', 1.5);
+
+    // Error bar caps (left)
+    g.selectAll('.err-cap-l')
+      .data(featureData)
+      .join('line')
+      .attr('x1', d => x(d.shap - d.geo_uncertainty))
+      .attr('x2', d => x(d.shap - d.geo_uncertainty))
+      .attr('y1', d => y(d.label) + bw * (0.5 - ew))
+      .attr('y2', d => y(d.label) + bw * (0.5 + ew))
+      .attr('stroke', '#374151').attr('stroke-width', 1.5);
+
+    // Error bar caps (right)
+    g.selectAll('.err-cap-r')
+      .data(featureData)
+      .join('line')
+      .attr('x1', d => x(d.shap + d.geo_uncertainty))
+      .attr('x2', d => x(d.shap + d.geo_uncertainty))
+      .attr('y1', d => y(d.label) + bw * (0.5 - ew))
+      .attr('y2', d => y(d.label) + bw * (0.5 + ew))
+      .attr('stroke', '#374151').attr('stroke-width', 1.5);
+
+    // Predicted SHAP (orange dot)
+    g.selectAll('.pred-dot')
+      .data(featureData)
+      .join('circle')
+      .attr('cx', d => x(d.pred))
+      .attr('cy', d => y(d.label) + bw / 2)
+      .attr('r', 4)
+      .attr('fill', '#f59e0b')
+      .attr('stroke', 'white')
+      .attr('stroke-width', 1.5);
+
+    // SHAP value labels at end of bars
+    g.selectAll('.shap-val-label')
+      .data(featureData)
+      .join('text')
+      .attr('class', 'shap-val-label')
+      .attr('x', d => d.shap >= 0 ? x(d.shap + d.geo_uncertainty) + 5 : x(d.shap - d.geo_uncertainty) - 5)
+      .attr('y', d => y(d.label) + bw / 2 + 4)
+      .attr('text-anchor', d => d.shap >= 0 ? 'start' : 'end')
+      .attr('font-size', 9.5)
+      .attr('fill', d => d.shap >= 0 ? '#dc2626' : '#2563eb')
+      .attr('font-weight', d => d.feature === currentFeature ? '600' : '400')
+      .text(d => `${d.shap >= 0 ? '+' : ''}${fmt2(d.shap)}`);
+
+    // Y axis
+    g.append('g')
+      .call(d3.axisLeft(y).tickSize(0))
+      .call(gEl => {
+        gEl.select('.domain').remove();
+        gEl.selectAll('.tick text')
+          .attr('font-size', d => {
+            const feat = featureData.find(f => f.label === d);
+            return feat && feat.feature === currentFeature ? 11 : 10.5;
+          })
+          .attr('fill', d => {
+            const feat = featureData.find(f => f.label === d);
+            return feat && feat.feature === currentFeature ? '#92400e' : '#475569';
+          })
+          .attr('font-weight', d => {
+            const feat = featureData.find(f => f.label === d);
+            return feat && feat.feature === currentFeature ? '600' : '400';
+          })
+          .attr('dx', '-4');
+      });
+
+    // X axis
+    g.append('g')
+      .attr('transform', `translate(0,${h})`)
+      .call(d3.axisBottom(x).ticks(7).tickFormat(d => fmt2(d)))
+      .call(gEl => {
+        gEl.select('.domain').attr('stroke', '#e2e8f0');
+        gEl.selectAll('.tick text').attr('font-size', 10.5).attr('fill', '#94a3b8');
+        gEl.selectAll('.tick line').attr('stroke', '#e2e8f0');
+      });
+
+    // X label
+    g.append('text')
+      .attr('x', w / 2).attr('y', h + 26)
+      .attr('text-anchor', 'middle')
+      .attr('font-size', 11).attr('fill', '#94a3b8')
+      .text('SHAP Value (contribution to price prediction)');
+
+    // Legend
+    const legItems = [
+      { sym: 'rect', color: '#dc2626', label: 'SHAP (positive)' },
+      { sym: 'rect', color: '#2563eb', label: 'SHAP (negative)' },
+      { sym: 'line', color: '#374151', label: 'Geo uncertainty interval' },
+      { sym: 'dot', color: '#f59e0b', label: 'Predicted SHAP' }
+    ];
+
+    const legG = g.append('g').attr('transform', `translate(${w - 160}, 0)`);
+    legItems.forEach((item, i) => {
+      const row = legG.append('g').attr('transform', `translate(0, ${i * 16})`);
+      if (item.sym === 'rect') {
+        row.append('rect').attr('x', 0).attr('y', 1).attr('width', 12).attr('height', 9).attr('rx', 2).attr('fill', item.color).attr('opacity', 0.75);
+      } else if (item.sym === 'line') {
+        row.append('line').attr('x1', 0).attr('x2', 12).attr('y1', 5).attr('y2', 5).attr('stroke', item.color).attr('stroke-width', 1.5);
+        row.append('line').attr('x1', 0).attr('x2', 0).attr('y1', 2).attr('y2', 8).attr('stroke', item.color).attr('stroke-width', 1.5);
+        row.append('line').attr('x1', 12).attr('x2', 12).attr('y1', 2).attr('y2', 8).attr('stroke', item.color).attr('stroke-width', 1.5);
+      } else {
+        row.append('circle').attr('cx', 6).attr('cy', 5).attr('r', 4).attr('fill', item.color).attr('stroke', 'white').attr('stroke-width', 1);
+      }
+      row.append('text').attr('x', 16).attr('y', 9).attr('font-size', 10).attr('fill', '#64748b').text(item.label);
+    });
+
+    // Title
+    svg.append('text')
+      .attr('x', 10).attr('y', 10)
+      .attr('font-size', 11).attr('font-weight', '600').attr('fill', '#1e293b')
+      .text(`SHAP Explanations — ${fmtPrice(point.price)} house at (${fmt2(point.lat)}°N, ${fmt2(Math.abs(point.lon))}°W)`);
+  }
+
+  // ── Utilities ──────────────────────────────────────────
+  function fmt2(v) {
+    if (v === undefined || v === null || isNaN(v)) return '—';
+    const n = parseFloat(v);
+    if (Math.abs(n) >= 100) return n.toFixed(0);
+    if (Math.abs(n) >= 10) return n.toFixed(1);
+    return n.toFixed(2);
+  }
+
+  // price is in units of $10k (e.g., 107.9 → $1,079,000)
+  function fmtPrice(price) {
+    const kDollars = price * 10; // convert to $k
+    if (kDollars >= 1000) return `$${(kDollars / 1000).toFixed(1)}M`;
+    return `$${Math.round(kDollars)}k`;
+  }
+
+  function fmtVal(v, feature) {
+    if (feature === 'sqft_living' || feature === 'sqft_lot') return Math.round(v).toLocaleString();
+    if (feature === 'waterfront') return v > 0.5 ? 'Yes' : 'No';
+    if (feature === 'lon' || feature === 'lat') return v.toFixed(4);
+    if (feature === 'age') return Math.round(v) + ' yr';
+    return parseFloat(v).toFixed(1);
+  }
+
+  function setText(id, text) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  }
+
+  // ── Window resize ──────────────────────────────────────
+  window.addEventListener('resize', () => {
+    if (currentTab === 'summary') renderSummaryChart();
+    if (currentTab === 'detail' && selectedPoint) renderDetailChart(selectedPoint);
+  });
+
+  return { init };
+})();
+
+// Start the app when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+  App.init();
+});
+</script>
+
+</body>
+</html>
