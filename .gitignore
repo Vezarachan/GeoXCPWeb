@@ -10,6 +10,12 @@ paper/
 notebooks/
 data/results.json
 
+# Source code (not needed for GitHub Pages)
+GeoConformal/
+GeoConformalizedExplainer/
+generate_data.py
+environment.yml
+
 # Conda / Python environments
 *.egg-info/
 .env
