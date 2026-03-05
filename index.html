@@ -1439,10 +1439,12 @@ const App = (() => {
       };
     });
 
-    // Sort by SHAP magnitude
-    featureData.sort((a, b) => Math.abs(a.shap) - Math.abs(b.shap));
+    // Sort by predicted SHAP magnitude
+    featureData.sort((a, b) => Math.abs(a.pred) - Math.abs(b.pred));
 
-    const allBounds = featureData.flatMap(d => [d.shap - d.geo_uncertainty, d.shap + d.geo_uncertainty]);
+    const allBounds = featureData.flatMap(d => [
+      d.pred - d.geo_uncertainty, d.pred + d.geo_uncertainty, d.shap
+    ]);
     const maxAbs = Math.max(Math.abs(d3.min(allBounds)), Math.abs(d3.max(allBounds))) * 1.15 || 1;
 
     const x = d3.scaleLinear().domain([-maxAbs, maxAbs]).range([0, w]);
@@ -1470,28 +1472,28 @@ const App = (() => {
       .attr('stroke-width', 1)
       .attr('opacity', 0.6);
 
-    // Bars
+    // Bars (predicted SHAP)
     g.selectAll('.shap-bar')
       .data(featureData)
       .join('rect')
       .attr('class', 'shap-bar')
-      .attr('x', d => x(Math.min(0, d.shap)))
+      .attr('x', d => x(Math.min(0, d.pred)))
       .attr('y', d => y(d.label))
-      .attr('width', d => Math.abs(x(d.shap) - x(0)))
+      .attr('width', d => Math.abs(x(d.pred) - x(0)))
       .attr('height', y.bandwidth())
       .attr('rx', 2)
-      .attr('fill', d => d.shap >= 0 ? '#dc2626' : '#2563eb')
-      .attr('opacity', d => d.feature === currentFeature ? 0.92 : 0.72);
+      .attr('fill', d => d.pred >= 0 ? '#dc2626' : '#2563eb')
+      .attr('opacity', d => d.feature === currentFeature ? 0.85 : 0.65);
 
-    // Uncertainty intervals (error bars)
+    // Uncertainty intervals (error bars): pred ± geo_uncertainty (½ interval width each side)
     const bw = y.bandwidth();
     const ew = 0.3;
 
     g.selectAll('.err-line')
       .data(featureData)
       .join('line')
-      .attr('x1', d => x(d.shap - d.geo_uncertainty))
-      .attr('x2', d => x(d.shap + d.geo_uncertainty))
+      .attr('x1', d => x(d.pred - d.geo_uncertainty))
+      .attr('x2', d => x(d.pred + d.geo_uncertainty))
       .attr('y1', d => y(d.label) + bw / 2)
       .attr('y2', d => y(d.label) + bw / 2)
       .attr('stroke', '#374151').attr('stroke-width', 1.5);
@@ -1500,8 +1502,8 @@ const App = (() => {
     g.selectAll('.err-cap-l')
       .data(featureData)
       .join('line')
-      .attr('x1', d => x(d.shap - d.geo_uncertainty))
-      .attr('x2', d => x(d.shap - d.geo_uncertainty))
+      .attr('x1', d => x(d.pred - d.geo_uncertainty))
+      .attr('x2', d => x(d.pred - d.geo_uncertainty))
       .attr('y1', d => y(d.label) + bw * (0.5 - ew))
       .attr('y2', d => y(d.label) + bw * (0.5 + ew))
       .attr('stroke', '#374151').attr('stroke-width', 1.5);
@@ -1510,33 +1512,47 @@ const App = (() => {
     g.selectAll('.err-cap-r')
       .data(featureData)
       .join('line')
-      .attr('x1', d => x(d.shap + d.geo_uncertainty))
-      .attr('x2', d => x(d.shap + d.geo_uncertainty))
+      .attr('x1', d => x(d.pred + d.geo_uncertainty))
+      .attr('x2', d => x(d.pred + d.geo_uncertainty))
       .attr('y1', d => y(d.label) + bw * (0.5 - ew))
       .attr('y2', d => y(d.label) + bw * (0.5 + ew))
       .attr('stroke', '#374151').attr('stroke-width', 1.5);
 
-    // Predicted SHAP (orange dot)
-    g.selectAll('.pred-dot')
+    // Actual SHAP dot (orange)
+    g.selectAll('.actual-shap-dot')
       .data(featureData)
       .join('circle')
-      .attr('cx', d => x(d.pred))
+      .attr('class', 'actual-shap-dot')
+      .attr('cx', d => x(d.shap))
       .attr('cy', d => y(d.label) + bw / 2)
-      .attr('r', 4)
+      .attr('r', 4.5)
       .attr('fill', '#f59e0b')
       .attr('stroke', 'white')
       .attr('stroke-width', 1.5);
 
-    // SHAP value labels at end of bars
+    // Predicted SHAP value labels at end of error bars
     g.selectAll('.shap-val-label')
       .data(featureData)
       .join('text')
       .attr('class', 'shap-val-label')
-      .attr('x', d => d.shap >= 0 ? x(d.shap + d.geo_uncertainty) + 5 : x(d.shap - d.geo_uncertainty) - 5)
+      .attr('x', d => d.pred >= 0 ? x(d.pred + d.geo_uncertainty) + 5 : x(d.pred - d.geo_uncertainty) - 5)
+      .attr('y', d => y(d.label) + bw / 2 - 2)
+      .attr('text-anchor', d => d.pred >= 0 ? 'start' : 'end')
+      .attr('font-size', 9)
+      .attr('fill', d => d.pred >= 0 ? '#b91c1c' : '#1d4ed8')
+      .attr('font-weight', d => d.feature === currentFeature ? '600' : '400')
+      .text(d => `p̂${d.pred >= 0 ? '+' : ''}${fmt2(d.pred)}`);
+
+    // Actual SHAP value labels near dot
+    g.selectAll('.actual-shap-label')
+      .data(featureData)
+      .join('text')
+      .attr('class', 'actual-shap-label')
+      .attr('x', d => x(d.shap) + (d.shap >= d.pred ? 7 : -7))
       .attr('y', d => y(d.label) + bw / 2 + 4)
-      .attr('text-anchor', d => d.shap >= 0 ? 'start' : 'end')
-      .attr('font-size', 9.5)
-      .attr('fill', d => d.shap >= 0 ? '#dc2626' : '#2563eb')
+      .attr('text-anchor', d => d.shap >= d.pred ? 'start' : 'end')
+      .attr('font-size', 9)
+      .attr('fill', '#b45309')
       .attr('font-weight', d => d.feature === currentFeature ? '600' : '400')
       .text(d => `${d.shap >= 0 ? '+' : ''}${fmt2(d.shap)}`);
 
@@ -1580,10 +1596,10 @@ const App = (() => {
 
     // Legend
     const legItems = [
-      { sym: 'rect', color: '#dc2626', label: 'SHAP (positive)' },
-      { sym: 'rect', color: '#2563eb', label: 'SHAP (negative)' },
-      { sym: 'line', color: '#374151', label: 'Geo uncertainty interval' },
-      { sym: 'dot', color: '#f59e0b', label: 'Predicted SHAP' }
+      { sym: 'rect', color: '#dc2626', label: 'Pred. SHAP (positive)' },
+      { sym: 'rect', color: '#2563eb', label: 'Pred. SHAP (negative)' },
+      { sym: 'line', color: '#374151', label: '±½ geo uncertainty' },
+      { sym: 'dot', color: '#f59e0b', label: 'Actual SHAP' }
     ];
 
     const legG = g.append('g').attr('transform', `translate(${w - 160}, 0)`);
