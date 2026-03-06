@@ -854,8 +854,7 @@
       <div class="control-group">
         <span class="control-label">Show</span>
         <div class="metric-btns">
-          <button class="metric-btn active" data-metric="geo_uncertainty">Geo Uncertainty</button>
-          <button class="metric-btn" data-metric="shap">SHAP Value</button>
+          <button class="metric-btn active" data-metric="shap">SHAP Value</button>
           <button class="metric-btn" data-metric="pred">Predicted SHAP</button>
         </div>
       </div>
@@ -897,7 +896,7 @@
       </div>
       <div class="legend-sep"></div>
       <div class="legend-size-wrap">
-        <span class="legend-title">Size = |SHAP|</span>
+        <span class="legend-title">Size = Geo Uncertainty</span>
         <div class="size-circles">
           <div class="size-circle" style="width:6px;height:6px"></div>
           <div class="size-circle" style="width:10px;height:10px"></div>
@@ -944,7 +943,7 @@ const App = (() => {
   let markers = [];
   let selectedMarker = null;
   let currentFeature = 'sqft_living';
-  let currentMetric = 'geo_uncertainty';
+  let currentMetric = 'shap';
   let currentTab = 'summary';
   let selectedPoint = null;
 
@@ -1128,16 +1127,13 @@ const App = (() => {
 
   // ── Color Scales ───────────────────────────────────────
   function getColorScale(metric, values) {
-    if (metric === 'geo_uncertainty') {
-      const max = d3.max(values);
-      return d3.scaleSequential([0, max || 1])
-        .interpolator(d3.interpolateYlOrRd);
-    } else {
-      // Diverging for SHAP / pred
-      const absMax = d3.max(values.map(Math.abs)) || 1;
-      return d3.scaleDiverging([-absMax, 0, absMax])
-        .interpolator(t => d3.interpolateRdBu(1 - t)); // red=positive, blue=negative
-    }
+    // Always diverging: red = positive SHAP, blue = negative SHAP
+    const absMax = d3.max(values.map(Math.abs)) || 1;
+    return v => {
+      // Linearly map [-absMax, absMax] → [0, 1], clamp, then apply RdBu (inverted)
+      const t = Math.max(0, Math.min(1, v / absMax * 0.5 + 0.5));
+      return d3.interpolateRdBu(1 - t); // red=positive, blue=negative
+    };
   }
 
   function getMetricValue(point, feature, metric) {
@@ -1154,19 +1150,25 @@ const App = (() => {
     markers.forEach(m => m.remove());
     markers = [];
 
-    const values = data.points.map(p => getMetricValue(p, currentFeature, currentMetric));
-    const absShap = data.points.map(p => p.features[currentFeature].shap_abs);
-    const colorScale = getColorScale(currentMetric, values);
-    const maxShap = d3.max(absShap) || 1;
+    // Color encodes SHAP value (actual or predicted), size encodes geo_uncertainty
+    const shapValues = data.points.map(p => getMetricValue(p, currentFeature, currentMetric));
+    const uncValues = data.points.map(p => p.features[currentFeature].geo_uncertainty);
+    const colorScale = getColorScale('shap', shapValues);
+    const minUnc = d3.min(uncValues) || 0;
+    const maxUnc = d3.max(uncValues) || 1;
+    const uncRange = maxUnc - minUnc || 1;
 
+    const MIN_R = 4, MAX_R = 18;
     function sizeScale(v) {
-      return 4 + (v / maxShap) * 10;
+      // Normalize to actual data range for maximum visual contrast
+      const t = (v - minUnc) / uncRange;
+      return MIN_R + t * (MAX_R - MIN_R);
     }
 
     data.points.forEach((point, idx) => {
-      const val = values[idx];
+      const val = shapValues[idx];
       const color = colorScale(val);
-      const radius = sizeScale(absShap[idx]);
+      const radius = sizeScale(uncValues[idx]);
       const labels = data.feature_labels || FEATURE_LABELS;
       const fData = point.features[currentFeature];
 
@@ -1206,7 +1208,7 @@ const App = (() => {
       markers.push(marker);
     });
 
-    updateLegend(colorScale, currentMetric, d3.extent(values));
+    updateLegend(colorScale, currentMetric, d3.extent(shapValues));
   }
 
   // ── Select point ───────────────────────────────────────
@@ -1238,28 +1240,29 @@ const App = (() => {
   // ── Legend ─────────────────────────────────────────────
   function updateLegend(colorScale, metric, [minV, maxV]) {
     const metricTitles = {
-      geo_uncertainty: 'Geo Uncertainty',
       shap: 'SHAP Value',
       pred: 'Predicted SHAP'
     };
 
-    setText('legend-title', `${metricTitles[metric] || metric} — ${(data.feature_labels||FEATURE_LABELS)[currentFeature] || currentFeature}`);
+    setText('legend-title', `Color: ${metricTitles[metric] || metric} — ${(data.feature_labels||FEATURE_LABELS)[currentFeature] || currentFeature}`);
 
-    // Build gradient stops
+    // Build gradient stops over symmetric [-absMax, +absMax] range
     const N = 20;
+    const absMaxLeg = Math.max(Math.abs(minV), Math.abs(maxV));
     const grad = document.getElementById('legend-grad');
     grad.innerHTML = '';
     d3.range(N + 1).forEach(i => {
       const t = i / N;
-      const v = minV + t * (maxV - minV);
+      const v = -absMaxLeg + t * 2 * absMaxLeg;
       const stop = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
       stop.setAttribute('offset', `${(t*100).toFixed(1)}%`);
       stop.setAttribute('stop-color', colorScale(v));
       grad.appendChild(stop);
     });
 
-    setText('legend-min', metric === 'geo_uncertainty' ? '0' : `${fmt2(minV)}`);
-    setText('legend-max', fmt2(maxV));
+    const absMax = Math.max(Math.abs(minV), Math.abs(maxV));
+    setText('legend-min', `−${fmt2(absMax)}`);
+    setText('legend-max', `+${fmt2(absMax)}`);
   }
 
   // ── Summary Chart ──────────────────────────────────────
