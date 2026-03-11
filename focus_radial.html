@@ -160,14 +160,6 @@
     </div>
     <div class="ctrl-divider"></div>
     <div class="ctrl-group">
-      <span class="ctrl-label">Left arc</span>
-      <div class="toggle-group">
-        <button class="toggle-btn active" id="btn-abshap">Mean |SHAP|</button>
-        <button class="toggle-btn"        id="btn-wshap">Weighted SHAP</button>
-      </div>
-    </div>
-    <div class="ctrl-divider"></div>
-    <div class="ctrl-group">
       <span class="ctrl-label">Bar color</span>
       <div class="toggle-group">
         <button class="toggle-btn active" id="btn-signed">SHAP direction</button>
@@ -215,7 +207,6 @@ let data, features, featureLabels;
 let map, circleLayer, centerLatLng;
 let radiusM   = 1000;
 let colorMode = 'signed';
-let shapMode  = 'abshap'; // 'abshap' = Mean|SHAP|, 'wshap' = Weighted SHAP
 let currentAgg = null;
 let hoveredIdx = null;   // which feature slice is expanded
 let sortedFeatures = []; // cached sorted feature list
@@ -317,8 +308,6 @@ function init() {
     if (circleLayer) { circleLayer.setRadius(radiusM); onCircleUpdate(); }
   });
 
-  document.getElementById('btn-abshap').addEventListener('click',  () => setShapMode('abshap'));
-  document.getElementById('btn-wshap').addEventListener('click',   () => setShapMode('wshap'));
   document.getElementById('btn-signed').addEventListener('click',  () => setColorMode('signed'));
   document.getElementById('btn-feature').addEventListener('click', () => setColorMode('feature'));
 }
@@ -368,7 +357,7 @@ function onCircleUpdate() {
   if (currentAgg && currentAgg.n) {
     sortedFeatures = features
       .map(f => ({ f, ...currentAgg.features[f] }))
-      .sort((a, b) => getShapVal(b) - getShapVal(a))
+      .sort((a, b) => b.abshap - a.abshap)
       .slice(0, MAX_SPOKES);
   } else {
     sortedFeatures = [];
@@ -427,13 +416,13 @@ function redrawRadial() {
   const N      = sortedFeatures.length;
   const angles = computeAngles(N, hoveredIdx);
 
-  const maxShap   = d3.max(sortedFeatures, d => getShapVal(d)) || 1;
+  const maxShap   = d3.max(sortedFeatures, d => d.abshap) || 1;
   const maxUncert = d3.max(sortedFeatures, d => d.uncert) || 1;
 
   // Sub-arc split: left half = SHAP, right half = uncertainty
   const shapArc = d3.arc()
     .innerRadius(rPx)
-    .outerRadius(d => rPx + (getShapVal(d) / maxShap) * MAX_H)
+    .outerRadius(d => rPx + (d.abshap / maxShap) * MAX_H)
     .startAngle(d => d.startAngle)
     .endAngle(d => d.midAngle - SUB_GAP / 2)
     .cornerRadius(2);
@@ -538,27 +527,20 @@ function redrawRadial() {
 
     // SHAP value — centered in left sub-arc at mid-height
     const shapMid  = (d.startAngle + d.midAngle - SUB_GAP / 2) / 2;
-    const shapR    = rPx + (getShapVal(d) / maxShap) * MAX_H * 0.55;
+    const shapR    = rPx + (d.abshap / maxShap) * MAX_H * 0.55;
     const shapLx   = Math.sin(shapMid) * shapR, shapLy = -Math.cos(shapMid) * shapR;
     const shapRot  = shapMid * 180 / Math.PI;
     const shapFlip = shapMid > Math.PI / 2 && shapMid < 3 * Math.PI / 2;
     const sg = g.append('g')
       .attr('transform', `translate(${shapLx},${shapLy}) rotate(${shapFlip ? shapRot + 180 : shapRot})`)
       .style('pointer-events', 'none');
-    if (shapMode === 'abshap') {
-      sg.append('text').attr('text-anchor', 'middle').attr('dy', '-0.55em')
-        .attr('font-size', 10).attr('font-weight', 700).attr('font-family', 'Inter, sans-serif')
-        .attr('fill', d.wshap >= 0 ? '#7c3aed' : '#0891b2')
-        .text((d.wshap >= 0 ? '+' : '') + fmt$(d.wshap));
-      sg.append('text').attr('text-anchor', 'middle').attr('dy', '0.75em')
-        .attr('font-size', 9).attr('font-family', 'Inter, sans-serif').attr('fill', '#475569')
-        .text(fmt$(d.abshap));
-    } else {
-      sg.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
-        .attr('font-size', 10).attr('font-weight', 700).attr('font-family', 'Inter, sans-serif')
-        .attr('fill', d.wshap >= 0 ? '#7c3aed' : '#0891b2')
-        .text((d.wshap >= 0 ? '+' : '') + fmt$(d.wshap));
-    }
+    sg.append('text').attr('text-anchor', 'middle').attr('dy', '-0.55em')
+      .attr('font-size', 10).attr('font-weight', 700).attr('font-family', 'Inter, sans-serif')
+      .attr('fill', d.wshap >= 0 ? '#7c3aed' : '#0891b2')
+      .text((d.wshap >= 0 ? '+' : '') + fmt$(d.wshap));
+    sg.append('text').attr('text-anchor', 'middle').attr('dy', '0.75em')
+      .attr('font-size', 9).attr('font-family', 'Inter, sans-serif').attr('fill', '#475569')
+      .text(fmt$(d.abshap));
 
     // Uncertainty value — centered in right sub-arc at mid-height
     const uncMid  = (d.midAngle + SUB_GAP / 2 + d.endAngle) / 2;
@@ -644,12 +626,8 @@ function updateRadialLegend() {
 
   // Section 1: SHAP arcs (left half of each slice)
   html += `<div class="rl-section">
-    <div class="rl-section-title">Left arc</div>`;
-  if (shapMode === 'abshap') {
-    html += `<div class="rl-row" style="font-size:10.5px;color:var(--muted)">Arc length = Mean |SHAP| (magnitude)</div>`;
-  } else {
-    html += `<div class="rl-row" style="font-size:10.5px;color:var(--muted)">Arc length = |Weighted SHAP|</div>`;
-  }
+    <div class="rl-section-title">Left arc — Mean |SHAP|</div>`;
+  html += `<div class="rl-row" style="font-size:10.5px;color:var(--muted)">Arc length = feature importance</div>`;
   if (colorMode === 'signed') {
     html += `
     <div class="rl-row" style="margin-top:4px"><span class="rl-swatch" style="background:#7c3aed"></span>Positive Weighted SHAP</div>
@@ -702,18 +680,6 @@ function getColor(d, i) {
     return d.wshap >= 0 ? '#7c3aed' : '#0891b2';
   }
   return PALETTE[i % PALETTE.length];
-}
-
-function getShapVal(d) {
-  return shapMode === 'abshap' ? d.abshap : Math.abs(d.wshap);
-}
-
-function setShapMode(mode) {
-  shapMode = mode;
-  document.getElementById('btn-abshap').classList.toggle('active', mode === 'abshap');
-  document.getElementById('btn-wshap').classList.toggle('active',  mode === 'wshap');
-  updateRadialLegend();
-  if (currentAgg && currentAgg.n) onCircleUpdate();
 }
 
 function setColorMode(mode) {
