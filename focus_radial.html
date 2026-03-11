@@ -611,7 +611,7 @@ function updateRadialLegend() {
   // Section 1: SHAP arcs (left half of each slice)
   html += `<div class="rl-section">
     <div class="rl-section-title">Left arc — Mean |SHAP|</div>`;
-  html += `<div class="rl-row" style="font-size:10.5px;color:var(--muted)">Arc length = feature importance</div>`;
+  html += `<div class="rl-row" style="margin-top:4px"><span class="rl-swatch" style="background:#3b5bdb"></span>Mean |SHAP| (arc length)</div>`;
   html += `</div>`;
 
   // Section 2: Uncertainty arc (right half)
