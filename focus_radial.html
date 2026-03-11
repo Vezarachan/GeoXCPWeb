@@ -219,10 +219,18 @@ function init() {
   features      = data.features.filter(f => !EXCLUDE.has(f));
   featureLabels = data.feature_labels;
 
-  map = L.map('map', { zoomControl: true }).setView([40.73, -73.98], 11);
+  map = L.map('map', { zoomControl: false, scrollWheelZoom: false, doubleClickZoom: false, touchZoom: false, boxZoom: false, keyboard: false });
   L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
     attribution: '© OpenStreetMap © CARTO', subdomains: 'abcd', maxZoom: 19
   }).addTo(map);
+
+  // Auto-fit map to data extent with padding
+  const lats = data.points.map(p => p.lat);
+  const lons = data.points.map(p => p.lon);
+  map.fitBounds([
+    [Math.min(...lats), Math.min(...lons)],
+    [Math.max(...lats), Math.max(...lons)]
+  ], { padding: [40, 40] });
 
   const incomes = data.points.map(p => p.income);
   const iMin = d3.quantile(incomes.slice().sort(d3.ascending), 0.02);
