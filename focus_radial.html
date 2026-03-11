@@ -160,11 +160,10 @@ const EXCLUDE    = new Set(['lon', 'lat']);
 const DEG_PER_M  = 1 / 111000;
 const MAX_SPOKES = 12;
 
-// Ring heights (px, fixed)
-const SHAP_H    = 80;   // max height of SHAP arc band
-const UNCERT_H  = 30;   // height of uncertainty arc band
-const BAND_GAP  = 8;    // gap between the two bands
-const LABEL_PAD = 10;   // padding after outer ring before label
+// Bar heights (px) — both bands share the same radial height range
+const MAX_H     = 90;   // max bar height for SHAP and uncertainty
+const LABEL_PAD = 12;   // padding after bars before label
+const SUB_GAP   = 0.006; // angular gap between SHAP bar and uncertainty bar within a slice
 
 // Angular gap between slices (radians)
 const SLICE_GAP = 0.018;
@@ -375,32 +374,29 @@ function redrawRadial() {
   const maxAbs    = d3.max(sortedFeatures, d => d.abshap) || 1;
   const maxUncert = d3.max(sortedFeatures, d => d.uncert) || 1;
 
-  // ── arc generators ──
-  // SHAP band: rPx → rPx + SHAP_H  (height scaled by abshap)
-  // Uncert band: rPx + SHAP_H + BAND_GAP → rPx + SHAP_H + BAND_GAP + UNCERT_H (height scaled)
+  // ── sub-arc split: each slice → left=SHAP, right=uncertainty ──
+  // SHAP sub-arc:   [startAngle,          midAngle - SUB_GAP/2]
+  // Uncert sub-arc: [midAngle + SUB_GAP/2, endAngle            ]
   const shapArc = d3.arc()
-    .innerRadius(d => rPx)
-    .outerRadius(d => rPx + (d.abshap / maxAbs) * SHAP_H)
+    .innerRadius(rPx)
+    .outerRadius(d => rPx + (d.abshap / maxAbs) * MAX_H)
     .startAngle(d => d.startAngle)
-    .endAngle(d => d.endAngle)
-    .padAngle(0)
+    .endAngle(d => d.midAngle - SUB_GAP / 2)
     .cornerRadius(2);
 
   const uncertArc = d3.arc()
-    .innerRadius(d => rPx + SHAP_H + BAND_GAP)
-    .outerRadius(d => rPx + SHAP_H + BAND_GAP + (d.uncert / maxUncert) * UNCERT_H)
-    .startAngle(d => d.startAngle)
+    .innerRadius(rPx)
+    .outerRadius(d => rPx + (d.uncert / maxUncert) * MAX_H)
+    .startAngle(d => d.midAngle + SUB_GAP / 2)
     .endAngle(d => d.endAngle)
-    .padAngle(0)
     .cornerRadius(2);
 
-  // Hit zone arc (full height, for mouse interaction)
+  // Hit zone covers full slice
   const hitArc = d3.arc()
     .innerRadius(rPx)
-    .outerRadius(rPx + SHAP_H + BAND_GAP + UNCERT_H + LABEL_PAD)
+    .outerRadius(rPx + MAX_H + LABEL_PAD)
     .startAngle(d => d.startAngle)
-    .endAngle(d => d.endAngle)
-    .padAngle(0);
+    .endAngle(d => d.endAngle);
 
   // ── build data with angles ──
   const sliceData = sortedFeatures.map((d, i) => ({
@@ -408,66 +404,56 @@ function redrawRadial() {
     color: getColor(d, i)
   }));
 
-  // ── bind / enter / update ──
+  // ── draw ──
   svg.selectAll('*').remove();
 
-  // Reference circle
+  // Base circle
   svg.append('circle')
     .attr('cx', cx).attr('cy', cy).attr('r', rPx)
     .attr('fill', 'none').attr('stroke', '#3b5bdb')
     .attr('stroke-width', 1.5).attr('opacity', 0.5);
 
-  // Reference rings (at SHAP_H * 25/50/75/100%)
+  // Reference rings at 25/50/75/100% of MAX_H
   [0.25, 0.5, 0.75, 1.0].forEach(t => {
     svg.append('circle')
-      .attr('cx', cx).attr('cy', cy).attr('r', rPx + t * SHAP_H)
+      .attr('cx', cx).attr('cy', cy).attr('r', rPx + t * MAX_H)
       .attr('fill', 'none').attr('stroke', '#94a3b8')
-      .attr('stroke-width', 0.5).attr('stroke-dasharray', '3,3').attr('opacity', 0.4);
+      .attr('stroke-width', 0.5).attr('stroke-dasharray', '3,3').attr('opacity', 0.35);
   });
-  // Outer reference ring (top of uncertainty band)
-  svg.append('circle')
-    .attr('cx', cx).attr('cy', cy)
-    .attr('r', rPx + SHAP_H + BAND_GAP + UNCERT_H)
-    .attr('fill', 'none').attr('stroke', '#d97706')
-    .attr('stroke-width', 0.5).attr('stroke-dasharray', '3,3').attr('opacity', 0.3);
 
   const g = svg.append('g').attr('transform', `translate(${cx},${cy})`);
 
   const slices = g.selectAll('.slice').data(sliceData, d => d.f)
     .join('g').attr('class', 'slice').style('pointer-events', 'all').style('cursor', 'pointer');
 
-  // SHAP arcs
+  // Left sub-arc: mean|SHAP| (feature color / signed color)
   slices.append('path')
     .attr('class', 'arc-shap')
     .attr('d', shapArc)
     .attr('fill', d => d.color)
-    .attr('opacity', d => hoveredIdx === null ? 0.82 : (d.idx === hoveredIdx ? 0.95 : 0.25))
+    .attr('opacity', d => hoveredIdx === null ? 0.82 : (d.idx === hoveredIdx ? 0.95 : 0.22))
     .attr('stroke', '#fff').attr('stroke-width', 0.5);
 
-  // Uncertainty arcs
+  // Right sub-arc: geo-uncertainty (amber)
   slices.append('path')
     .attr('class', 'arc-uncert')
     .attr('d', uncertArc)
     .attr('fill', '#f59e0b')
-    .attr('opacity', d => hoveredIdx === null ? 0.6 : (d.idx === hoveredIdx ? 0.8 : 0.15))
+    .attr('opacity', d => hoveredIdx === null ? 0.65 : (d.idx === hoveredIdx ? 0.85 : 0.18))
     .attr('stroke', '#fff').attr('stroke-width', 0.5);
 
-  // Labels: outside outer ring
+  // Labels outside
   slices.append('text')
     .attr('class', 'slice-label')
     .attr('transform', d => {
-      const r = rPx + SHAP_H + BAND_GAP + UNCERT_H + LABEL_PAD;
+      const r = rPx + MAX_H + LABEL_PAD;
       const mx = d.midAngle;
-      const x = Math.sin(mx) * r;
-      const y = -Math.cos(mx) * r;
-      const rot = (mx * 180 / Math.PI);
+      const x = Math.sin(mx) * r, y = -Math.cos(mx) * r;
+      const rot = mx * 180 / Math.PI;
       const flip = mx > Math.PI / 2 && mx < 3 * Math.PI / 2;
       return `translate(${x},${y}) rotate(${flip ? rot + 180 : rot})`;
     })
-    .attr('text-anchor', d => {
-      const flip = d.midAngle > Math.PI / 2 && d.midAngle < 3 * Math.PI / 2;
-      return flip ? 'end' : 'start';
-    })
+    .attr('text-anchor', d => (d.midAngle > Math.PI / 2 && d.midAngle < 3 * Math.PI / 2) ? 'end' : 'start')
     .attr('dy', '0.35em')
     .attr('font-size', d => hoveredIdx === d.idx ? 11 : 9)
     .attr('font-weight', d => hoveredIdx === d.idx ? 600 : 400)
@@ -476,49 +462,51 @@ function redrawRadial() {
     .style('pointer-events', 'none')
     .text(d => SHORT[d.f] || d.f);
 
-  // Inline value labels inside expanded slice
+  // Inline labels inside expanded slice
   if (hoveredIdx !== null) {
     const d = sliceData[hoveredIdx];
-    const mx = d.midAngle;
-    const labelR = rPx + SHAP_H * 0.5;
-    const lx = Math.sin(mx) * labelR;
-    const ly = -Math.cos(mx) * labelR;
-    const rot = (mx * 180 / Math.PI);
-    const flip = mx > Math.PI / 2 && mx < 3 * Math.PI / 2;
+    const flip = d.midAngle > Math.PI / 2 && d.midAngle < 3 * Math.PI / 2;
+    const rot  = d.midAngle * 180 / Math.PI;
+    const rotFn = (r, angle) => {
+      const x = Math.sin(angle) * r, y = -Math.cos(angle) * r;
+      return `translate(${x},${y}) rotate(${flip ? rot + 180 : rot})`;
+    };
 
-    const valG = g.append('g')
-      .attr('transform', `translate(${lx},${ly}) rotate(${flip ? rot + 180 : rot})`)
+    // SHAP label — centered in left sub-arc at mid-height
+    const shapMid = (d.startAngle + d.midAngle - SUB_GAP / 2) / 2;
+    const shapR   = rPx + (d.abshap / maxAbs) * MAX_H * 0.55;
+    const shapLx  = Math.sin(shapMid) * shapR, shapLy = -Math.cos(shapMid) * shapR;
+    const shapRot = shapMid * 180 / Math.PI;
+    const shapFlip = shapMid > Math.PI / 2 && shapMid < 3 * Math.PI / 2;
+
+    const sg = g.append('g')
+      .attr('transform', `translate(${shapLx},${shapLy}) rotate(${shapFlip ? shapRot + 180 : shapRot})`)
       .style('pointer-events', 'none');
-
-    valG.append('text')
-      .attr('text-anchor', 'middle').attr('dy', '-0.6em')
-      .attr('font-size', 10).attr('font-weight', 700)
-      .attr('font-family', 'Inter, sans-serif')
+    sg.append('text').attr('text-anchor', 'middle').attr('dy', '-0.55em')
+      .attr('font-size', 10).attr('font-weight', 700).attr('font-family', 'Inter, sans-serif')
       .attr('fill', d.wshap >= 0 ? '#dc2626' : '#2563eb')
       .text((d.wshap >= 0 ? '+' : '') + fmt$(d.wshap));
+    sg.append('text').attr('text-anchor', 'middle').attr('dy', '0.75em')
+      .attr('font-size', 9).attr('font-family', 'Inter, sans-serif').attr('fill', '#475569')
+      .text(fmt$(d.abshap));
 
-    valG.append('text')
-      .attr('text-anchor', 'middle').attr('dy', '0.8em')
-      .attr('font-size', 9).attr('font-family', 'Inter, sans-serif')
-      .attr('fill', '#475569')
-      .text('|SHAP| ' + fmt$(d.abshap));
+    // Uncertainty label — centered in right sub-arc at mid-height
+    const uncMid = (d.midAngle + SUB_GAP / 2 + d.endAngle) / 2;
+    const uncR   = rPx + (d.uncert / maxUncert) * MAX_H * 0.55;
+    const uncLx  = Math.sin(uncMid) * uncR, uncLy = -Math.cos(uncMid) * uncR;
+    const uncRot = uncMid * 180 / Math.PI;
+    const uncFlip = uncMid > Math.PI / 2 && uncMid < 3 * Math.PI / 2;
 
-    // Uncertainty label on the outer band
-    const uR = rPx + SHAP_H + BAND_GAP + UNCERT_H * 0.5;
-    const ux = Math.sin(mx) * uR;
-    const uy = -Math.cos(mx) * uR;
     g.append('g')
-      .attr('transform', `translate(${ux},${uy}) rotate(${flip ? rot + 180 : rot})`)
+      .attr('transform', `translate(${uncLx},${uncLy}) rotate(${uncFlip ? uncRot + 180 : uncRot})`)
       .style('pointer-events', 'none')
-      .append('text')
-      .attr('text-anchor', 'middle').attr('dy', '0.35em')
-      .attr('font-size', 9).attr('font-weight', 600)
-      .attr('font-family', 'Inter, sans-serif')
+      .append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
+      .attr('font-size', 9).attr('font-weight', 600).attr('font-family', 'Inter, sans-serif')
       .attr('fill', '#92400e')
       .text('±' + fmt$(d.uncert));
   }
 
-  // Hit zones (transparent, on top)
+  // Hit zones
   slices.append('path')
     .attr('class', 'arc-hit')
     .attr('d', hitArc)
@@ -528,7 +516,6 @@ function redrawRadial() {
     .on('mousemove',  function(event, d) { moveTooltip(event); })
     .on('mouseleave', function() { setHovered(null); });
 
-  // Band legend (top-right inside SVG)
   drawBandLegend(svg, cx, cy, rPx);
 }
 
