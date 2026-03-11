@@ -23,7 +23,8 @@
     .chip { background: var(--bg); border: 1px solid var(--border); border-radius: 20px; padding: 3px 10px; font-size: 11px; color: var(--muted); font-weight: 500; }
 
     /* ── MAP ── */
-    #map { flex: 1; position: relative; }
+    #map { flex: 1; position: relative; cursor: crosshair; }
+    #map.dragging { cursor: grabbing; }
 
     /* ── RADIAL SVG OVERLAY ── */
     #radial-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 500; overflow: visible; }
@@ -228,7 +229,7 @@ function init() {
   features      = data.features.filter(f => !EXCLUDE.has(f));
   featureLabels = data.feature_labels;
 
-  map = L.map('map', { zoomControl: false, scrollWheelZoom: false, doubleClickZoom: false, touchZoom: false, boxZoom: false, keyboard: false });
+  map = L.map('map', { zoomControl: false, scrollWheelZoom: false, doubleClickZoom: false, touchZoom: false, boxZoom: false, keyboard: false, dragging: false });
   L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
     attribution: '© OpenStreetMap © CARTO', subdomains: 'abcd', maxZoom: 19
   }).addTo(map);
@@ -269,12 +270,39 @@ function init() {
     L.DomEvent.disableScrollPropagation(el);
   });
 
+  // First click places circle; subsequent mousedown anywhere drags it in real-time
   map.on('click', e => {
-    if (circleLayer) { circleLayer.setLatLng(e.latlng); }
-    else             { placeCircle(e.latlng); }
-    centerLatLng = e.latlng;
-    onCircleUpdate();
-    document.getElementById('map-hint').classList.add('hidden');
+    if (!circleLayer) {
+      placeCircle(e.latlng);
+      centerLatLng = e.latlng;
+      onCircleUpdate();
+      document.getElementById('map-hint').classList.add('hidden');
+    }
+  });
+
+  map.on('mousedown', e => {
+    if (!circleLayer) return;
+    let moved = false;
+    const mapEl = document.getElementById('map');
+    const onMove = ev => {
+      if (!moved) { moved = true; mapEl.classList.add('dragging'); }
+      centerLatLng = ev.latlng;
+      circleLayer.setLatLng(ev.latlng);
+      onCircleUpdate();
+    };
+    const onUp = () => {
+      mapEl.classList.remove('dragging');
+      map.off('mousemove', onMove);
+      map.off('mouseup', onUp);
+      if (!moved) {
+        // treat as click: teleport circle
+        centerLatLng = e.latlng;
+        circleLayer.setLatLng(e.latlng);
+        onCircleUpdate();
+      }
+    };
+    map.on('mousemove', onMove);
+    map.on('mouseup', onUp);
   });
 
   map.on('move zoom', redrawRadial);
@@ -302,16 +330,6 @@ function placeCircle(latlng) {
     radius: radiusM, color: '#3b5bdb', weight: 1.5,
     fillColor: '#3b5bdb', fillOpacity: 0.05
   }).addTo(map);
-  circleLayer.on('mousedown', startDrag);
-}
-
-function startDrag(e) {
-  map.dragging.disable();
-  const onMove = ev => { centerLatLng = ev.latlng; circleLayer.setLatLng(ev.latlng); redrawRadial(); };
-  const onUp   = ()  => { map.dragging.enable(); map.off('mousemove', onMove); map.off('mouseup', onUp); onCircleUpdate(); };
-  map.on('mousemove', onMove);
-  map.on('mouseup', onUp);
-  L.DomEvent.stopPropagation(e);
 }
 
 // ── aggregation ────────────────────────────────────────────
