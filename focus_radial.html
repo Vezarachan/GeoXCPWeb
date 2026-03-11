@@ -643,13 +643,17 @@ function updateRadialLegend() {
   let html = `<div class="legend-title">Radial Chart</div>`;
 
   // Section 1: SHAP arcs (left half of each slice)
-  const shapTitle = shapMode === 'abshap' ? 'Mean |SHAP| (left arc)' : 'Weighted SHAP (left arc)';
   html += `<div class="rl-section">
-    <div class="rl-section-title">${shapTitle}</div>`;
+    <div class="rl-section-title">Left arc</div>`;
+  if (shapMode === 'abshap') {
+    html += `<div class="rl-row" style="font-size:10.5px;color:var(--muted)">Arc length = Mean |SHAP| (magnitude)</div>`;
+  } else {
+    html += `<div class="rl-row" style="font-size:10.5px;color:var(--muted)">Arc length = |Weighted SHAP|</div>`;
+  }
   if (colorMode === 'signed') {
     html += `
-    <div class="rl-row"><span class="rl-swatch" style="background:#7c3aed"></span>Positive effect on income</div>
-    <div class="rl-row"><span class="rl-swatch" style="background:#0891b2"></span>Negative effect on income</div>`;
+    <div class="rl-row" style="margin-top:4px"><span class="rl-swatch" style="background:#7c3aed"></span>Positive Weighted SHAP</div>
+    <div class="rl-row"><span class="rl-swatch" style="background:#0891b2"></span>Negative Weighted SHAP</div>`;
   } else {
     // Feature color mode: list up to 6 features with palette colors, then "..."
     const limit = Math.min(sortedFeatures.length, 6);
