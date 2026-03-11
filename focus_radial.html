@@ -84,6 +84,23 @@
     .legend-grad  { width: 100%; height: 8px; border-radius: 4px; margin-bottom: 4px; }
     .legend-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); }
 
+    /* ── RADIAL LEGEND ── */
+    #radial-legend {
+      position: absolute; left: 12px; bottom: 80px;
+      background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 13px; z-index: 800; min-width: 170px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.08);
+    }
+    .rl-section { margin-top: 8px; }
+    .rl-section:first-child { margin-top: 0; }
+    .rl-section-title { font-size: 9px; font-weight: 700; color: var(--light); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 5px; }
+    .rl-row { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; font-size: 11px; color: var(--muted); }
+    .rl-row:last-child { margin-bottom: 0; }
+    .rl-swatch { width: 11px; height: 11px; border-radius: 2px; flex-shrink: 0; opacity: 0.85; }
+    .rl-grad-swatch { width: 60px; height: 8px; border-radius: 3px; flex-shrink: 0; }
+    .rl-divider { border: none; border-top: 1px solid var(--border); margin: 7px 0; }
+    .rl-note { font-size: 9.5px; color: var(--light); margin-top: 6px; }
+
     /* ── NO DATA ── */
     #no-data { position: absolute; inset: 0; background: rgba(241,245,249,.96); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 2000; gap: 12px; }
     #no-data h2 { font-size: 18px; }
@@ -129,6 +146,9 @@
     <div class="legend-grad" id="legend-grad"></div>
     <div class="legend-labels"><span id="leg-min">—</span><span id="leg-max">—</span></div>
   </div>
+
+  <!-- Radial chart legend -->
+  <div id="radial-legend" style="display:none"></div>
 
   <!-- Controls -->
   <div class="controls" id="controls" style="display:none">
@@ -220,9 +240,11 @@ function init() {
   });
 
   buildLegend(cScale, iMin, iMax);
-  document.getElementById('map-legend').style.display = '';
-  document.getElementById('controls').style.display   = '';
+  document.getElementById('map-legend').style.display    = '';
+  document.getElementById('controls').style.display      = '';
+  document.getElementById('radial-legend').style.display = '';
   document.getElementById('chip-n').textContent = `${data.meta.n_total} tracts`;
+  updateRadialLegend();
 
   ['controls','map-legend'].forEach(id => {
     const el = document.getElementById(id);
@@ -314,6 +336,7 @@ function onCircleUpdate() {
   } else {
     sortedFeatures = [];
   }
+  updateRadialLegend();
   redrawRadial();
 }
 
@@ -397,6 +420,16 @@ function redrawRadial() {
   }));
 
   svg.selectAll('*').remove();
+
+  // Gray overlay outside the focus circle (even-odd: large rect with circular hole)
+  const svgEl   = document.getElementById('radial-svg');
+  const W = svgEl.clientWidth  || window.innerWidth;
+  const H = svgEl.clientHeight || window.innerHeight;
+  svg.append('path')
+    .attr('d', `M0,0 H${W} V${H} H0 Z M${cx},${cy} m${-rPx},0 a${rPx},${rPx} 0 1,0 ${rPx*2},0 a${rPx},${rPx} 0 1,0 ${-rPx*2},0`)
+    .attr('fill', 'rgba(148,163,184,0.38)')
+    .attr('fill-rule', 'evenodd')
+    .style('pointer-events', 'none');
 
   // Focus circle ring
   svg.append('circle')
@@ -558,22 +591,60 @@ function moveTooltip(event) {
   tip.style.top  = y + 'px';
 }
 
-// ── band legend ────────────────────────────────────────────
-function drawBandLegend(svg, cx, cy, rPx) {
-  const lx = 16, ly = 16;
-  const lg = svg.append('g').attr('transform', `translate(${lx},${ly})`);
-  const items = [
-    { color: '#6366f1', label: 'Mean |SHAP|' },
-    { color: '#f59e0b', label: 'Geo-uncertainty' }
-  ];
-  items.forEach((it, i) => {
-    lg.append('rect').attr('x', 0).attr('y', i * 16).attr('width', 10).attr('height', 10)
-      .attr('rx', 2).attr('fill', it.color).attr('opacity', 0.75);
-    lg.append('text').attr('x', 14).attr('y', i * 16 + 9)
-      .attr('font-size', 9.5).attr('font-family', 'Inter,sans-serif').attr('fill', '#475569')
-      .text(it.label);
-  });
+// ── radial legend (HTML card) ──────────────────────────────
+function updateRadialLegend() {
+  const el = document.getElementById('radial-legend');
+  if (!el) return;
+
+  let html = `<div class="legend-title">Radial Chart</div>`;
+
+  // Section 1: SHAP arcs (left half of each slice)
+  html += `<div class="rl-section">
+    <div class="rl-section-title">Mean |SHAP| (left arc)</div>`;
+  if (colorMode === 'signed') {
+    html += `
+    <div class="rl-row"><span class="rl-swatch" style="background:#7c3aed"></span>Positive effect on income</div>
+    <div class="rl-row"><span class="rl-swatch" style="background:#0891b2"></span>Negative effect on income</div>`;
+  } else {
+    // Feature color mode: list up to 6 features with palette colors, then "..."
+    const limit = Math.min(sortedFeatures.length, 6);
+    for (let i = 0; i < limit; i++) {
+      const d = sortedFeatures[i];
+      const c = PALETTE[i % PALETTE.length];
+      html += `<div class="rl-row"><span class="rl-swatch" style="background:${c}"></span>${SHORT[d.f] || d.f}</div>`;
+    }
+    if (sortedFeatures.length > 6) html += `<div class="rl-row" style="color:var(--light);font-size:10px">…${sortedFeatures.length - 6} more features</div>`;
+  }
+  html += `</div>`;
+
+  // Section 2: Uncertainty arc (right half)
+  html += `<hr class="rl-divider">
+  <div class="rl-section">
+    <div class="rl-section-title">Geo-uncertainty (right arc)</div>
+    <div class="rl-row"><span class="rl-swatch" style="background:#f59e0b"></span>Prediction interval width</div>
+  </div>`;
+
+  // Section 3: Income dots
+  html += `<hr class="rl-divider">
+  <div class="rl-section">
+    <div class="rl-section-title">Census tract dots</div>
+    <div class="rl-row">
+      <span class="rl-grad-swatch" style="background:linear-gradient(to right,#93c5fd,#1e3a8a)"></span>
+      Median income
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:9.5px;color:var(--light);margin-top:1px">
+      <span>Low</span><span>High</span>
+    </div>
+  </div>`;
+
+  // Scale note
+  html += `<p class="rl-note">Arc length = relative magnitude within circle</p>`;
+
+  el.innerHTML = html;
 }
+
+// ── band legend (SVG, no-op — replaced by HTML card) ───────
+function drawBandLegend(svg, cx, cy, rPx) {}
 
 // ── color ─────────────────────────────────────────────────
 function getColor(d, i) {
@@ -588,6 +659,7 @@ function setColorMode(mode) {
   colorMode = mode;
   document.getElementById('btn-signed').classList.toggle('active',  mode === 'signed');
   document.getElementById('btn-feature').classList.toggle('active', mode === 'feature');
+  updateRadialLegend();
   if (circleLayer) redrawRadial();
 }
 
