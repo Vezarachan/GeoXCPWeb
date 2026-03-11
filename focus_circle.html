@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NYC Income SHAP | GeoXCP Focus Circle</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary: #3b5bdb;
+      --amber:   #d97706;
+      --red:     #dc2626;
+      --blue:    #2563eb;
+      --bg:      #f1f5f9;
+      --card:    #ffffff;
+      --border:  #e2e8f0;
+      --text:    #1e293b;
+      --muted:   #64748b;
+      --light:   #94a3b8;
+    }
+
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+
+    /* ── HEADER ── */
+    .header {
+      height: 52px;
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      gap: 14px;
+      z-index: 1000;
+      flex-shrink: 0;
+    }
+    .logo-badge { background: var(--primary); color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px; letter-spacing: .5px; }
+    .header-title { font-size: 15px; font-weight: 600; color: var(--text); }
+    .header-sub   { font-size: 12px; color: var(--muted); }
+    .header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+    .chip { background: var(--bg); border: 1px solid var(--border); border-radius: 20px; padding: 3px 10px; font-size: 11px; color: var(--muted); font-weight: 500; }
+
+    /* ── MAP ── */
+    #map { flex: 1; position: relative; }
+
+    /* ── CONTROLS PANEL (bottom) ── */
+    .controls {
+      position: absolute;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      box-shadow: 0 4px 20px rgba(0,0,0,.12);
+      z-index: 800;
+      min-width: 420px;
+    }
+    .ctrl-group { display: flex; align-items: center; gap: 8px; }
+    .ctrl-label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; white-space: nowrap; }
+    .ctrl-value { font-size: 12px; font-weight: 600; color: var(--primary); min-width: 52px; }
+
+    input[type=range] {
+      -webkit-appearance: none;
+      width: 140px; height: 4px;
+      background: linear-gradient(to right, var(--primary) var(--pct, 30%), var(--border) var(--pct, 30%));
+      border-radius: 2px; outline: none; cursor: pointer;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px; height: 14px;
+      background: var(--primary);
+      border-radius: 50%;
+      box-shadow: 0 1px 4px rgba(59,91,219,.4);
+    }
+
+    .toggle-group { display: flex; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+    .toggle-btn {
+      padding: 5px 10px;
+      font-size: 11px; font-weight: 600;
+      cursor: pointer; border: none; background: transparent;
+      color: var(--muted); transition: all .15s;
+      white-space: nowrap;
+    }
+    .toggle-btn.active { background: var(--primary); color: #fff; }
+
+    .ctrl-divider { width: 1px; height: 24px; background: var(--border); }
+
+    /* ── HINT ── */
+    .map-hint {
+      position: absolute;
+      top: 16px; left: 50%; transform: translateX(-50%);
+      background: rgba(30,41,59,.85);
+      color: #fff;
+      font-size: 12px; font-weight: 500;
+      padding: 8px 16px; border-radius: 20px;
+      pointer-events: none;
+      z-index: 800;
+      transition: opacity .4s;
+    }
+    .map-hint.hidden { opacity: 0; }
+
+    /* ── FOCUS PANEL ── */
+    .focus-panel {
+      position: absolute;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.15);
+      width: 300px;
+      max-height: 520px;
+      display: flex; flex-direction: column;
+      z-index: 900;
+      transition: opacity .2s;
+      pointer-events: auto;
+    }
+    .focus-panel.hidden { opacity: 0; pointer-events: none; }
+
+    .fp-header {
+      padding: 10px 14px 8px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .fp-title { font-size: 12px; font-weight: 700; color: var(--text); flex: 1; }
+    .fp-meta  { font-size: 10.5px; color: var(--muted); font-weight: 500; }
+    .fp-close {
+      width: 20px; height: 20px; border-radius: 50%;
+      background: var(--bg); border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; color: var(--muted); flex-shrink: 0;
+    }
+    .fp-close:hover { background: #fee2e2; color: var(--red); }
+
+    .fp-body { overflow-y: auto; padding: 8px 0 4px; flex: 1; }
+
+    /* Bar chart rows */
+    .fp-legend {
+      padding: 4px 14px 6px;
+      display: flex; gap: 14px;
+      font-size: 10px; color: var(--muted);
+      border-bottom: 1px solid var(--border);
+    }
+    .fp-legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 3px; vertical-align: middle; }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 130px 1fr 46px;
+      align-items: center;
+      padding: 2px 14px;
+      gap: 6px;
+      min-height: 22px;
+    }
+    .bar-row:hover { background: #f8fafc; }
+
+    .bar-label { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .bar-track {
+      position: relative;
+      height: 12px;
+      background: var(--bg);
+      border-radius: 3px;
+      overflow: visible;
+    }
+
+    /* center line (signed mode) */
+    .bar-center {
+      position: absolute;
+      top: 0; bottom: 0;
+      width: 1px;
+      background: var(--border);
+    }
+
+    .bar-fill {
+      position: absolute;
+      top: 1px; bottom: 1px;
+      border-radius: 2px;
+      transition: width .25s, left .25s;
+    }
+
+    /* uncertainty extension (lighter) */
+    .bar-uncert {
+      position: absolute;
+      top: 2px; bottom: 2px;
+      border-radius: 2px;
+      opacity: 0.35;
+      transition: width .25s, left .25s;
+    }
+
+    .bar-val { font-size: 10px; font-weight: 600; color: var(--text); text-align: right; }
+
+    .fp-empty { padding: 20px 14px; text-align: center; font-size: 12px; color: var(--light); }
+
+    /* ── LEGEND (map) ── */
+    .map-legend {
+      position: absolute;
+      right: 12px; top: 12px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      z-index: 800;
+      min-width: 140px;
+    }
+    .legend-title { font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 6px; }
+    .legend-grad {
+      width: 100%; height: 8px;
+      border-radius: 4px;
+      margin-bottom: 4px;
+    }
+    .legend-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); }
+
+    /* ── NO DATA OVERLAY ── */
+    #no-data {
+      position: absolute; inset: 0;
+      background: rgba(241,245,249,.96);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      z-index: 2000; gap: 12px;
+    }
+    #no-data h2 { font-size: 18px; color: var(--text); }
+    #no-data p  { font-size: 13px; color: var(--muted); text-align: center; max-width: 400px; line-height: 1.6; }
+    #no-data code { background: #1e293b; color: #94d82d; padding: 8px 16px; border-radius: 6px; font-size: 12px; display: block; margin-top: 4px; }
+
+    /* ── LEAFLET CIRCLE CURSOR ── */
+    .leaflet-interactive.focus-ring { cursor: move !important; }
+  </style>
+</head>
+<body>
+
+<header class="header">
+  <span class="logo-badge">GeoXCP</span>
+  <div>
+    <div class="header-title">NYC Median Income — Focus Circle Explorer</div>
+    <div class="header-sub">Click map to place a Focus Circle · Drag to move · Slider adjusts radius</div>
+  </div>
+  <div class="header-right">
+    <span class="chip" id="chip-n">— tracts</span>
+    <span class="chip" id="chip-r">— radius</span>
+  </div>
+</header>
+
+<div id="map">
+  <!-- No-data overlay -->
+  <div id="no-data">
+    <h2>Data not found</h2>
+    <p>Run the data generation script first, then serve this file from a local web server:</p>
+    <code>/opt/anaconda3/envs/UncertaintyGeoXAI/bin/python generate_data_nyc.py</code>
+    <code>python3 -m http.server 8765</code>
+  </div>
+
+  <!-- Map hint -->
+  <div class="map-hint" id="map-hint">Click anywhere on the map to place a Focus Circle</div>
+
+  <!-- Legend -->
+  <div class="map-legend" id="map-legend" style="display:none">
+    <div class="legend-title">Median Income</div>
+    <div class="legend-grad" id="legend-grad"></div>
+    <div class="legend-labels">
+      <span id="leg-min">—</span>
+      <span id="leg-max">—</span>
+    </div>
+  </div>
+
+  <!-- Focus panel -->
+  <div class="focus-panel hidden" id="focus-panel">
+    <div class="fp-header">
+      <div>
+        <div class="fp-title">Focus Circle</div>
+        <div class="fp-meta" id="fp-meta">— tracts · — km radius</div>
+      </div>
+      <button class="fp-close" id="fp-close" title="Close">✕</button>
+    </div>
+    <div class="fp-legend">
+      <span><span class="fp-legend-dot" style="background:#dc2626"></span>Positive SHAP</span>
+      <span><span class="fp-legend-dot" style="background:#2563eb"></span>Negative SHAP</span>
+      <span><span class="fp-legend-dot" style="background:#d97706;opacity:.5"></span>Uncertainty</span>
+    </div>
+    <div class="fp-body" id="fp-body">
+      <div class="fp-empty">Place circle on the map</div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls" id="controls" style="display:none">
+    <div class="ctrl-group">
+      <span class="ctrl-label">Radius</span>
+      <input type="range" id="radius-slider" min="200" max="5000" step="50" value="1000">
+      <span class="ctrl-value" id="radius-val">1.0 km</span>
+    </div>
+    <div class="ctrl-divider"></div>
+    <div class="ctrl-group">
+      <span class="ctrl-label">Show</span>
+      <div class="toggle-group">
+        <button class="toggle-btn active" id="btn-wshap">Weighted SHAP</button>
+        <button class="toggle-btn"        id="btn-abshap">Mean |SHAP|</button>
+      </div>
+    </div>
+  </div>
+</div><!-- end #map -->
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="data/results_nyc.js"></script>
+
+<script>
+'use strict';
+
+// ── constants ──────────────────────────────────────────────────────
+const EXCLUDE_FEATURES = new Set(['lon', 'lat']); // hide spatial coords from bar chart
+const DEG_PER_METER    = 1 / 111000;
+const PANEL_W          = 300;   // px, matches .focus-panel width
+const PANEL_OFFSET     = 20;    // px gap between circle edge and panel
+
+// ── state ──────────────────────────────────────────────────────────
+let data, features, featureLabels;
+let circleLayer  = null;   // L.circle
+let centerLatLng = null;
+let radiusM      = 1000;
+let showMode     = 'wshap';  // 'wshap' | 'abshap'
+let map;
+
+// ── init ───────────────────────────────────────────────────────────
+function init() {
+  if (typeof window.GeoXCPDataNYC === 'undefined') return;
+  document.getElementById('no-data').style.display = 'none';
+
+  data          = window.GeoXCPDataNYC;
+  features      = data.features.filter(f => !EXCLUDE_FEATURES.has(f));
+  featureLabels = data.feature_labels;
+
+  // ── Leaflet map ──
+  map = L.map('map', { zoomControl: true }).setView([40.73, -73.98], 11);
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap © CARTO',
+    subdomains: 'abcd', maxZoom: 19
+  }).addTo(map);
+
+  // ── color scale (income) ──
+  const incomes  = data.points.map(p => p.income);
+  const incomeMin = d3.quantile(incomes.slice().sort(d3.ascending), 0.02);
+  const incomeMax = d3.quantile(incomes.slice().sort(d3.ascending), 0.98);
+  const colorScale = d3.scaleSequential(d3.interpolateYlOrRd).domain([incomeMin, incomeMax]);
+
+  // ── draw tract dots ──
+  const markersLayer = L.layerGroup().addTo(map);
+  data.points.forEach(pt => {
+    L.circleMarker([pt.lat, pt.lon], {
+      radius: 4,
+      fillColor:   colorScale(pt.income),
+      color:       '#ffffff',
+      weight:      0.5,
+      fillOpacity: 0.8
+    })
+    .bindTooltip(`<b>${fmt$(pt.income)}</b> median income`, { sticky: true })
+    .addTo(markersLayer);
+  });
+
+  // ── legend ──
+  buildLegend(colorScale, incomeMin, incomeMax);
+  document.getElementById('map-legend').style.display = '';
+  document.getElementById('controls').style.display   = '';
+
+  // Prevent clicks on overlay panels from propagating to the Leaflet map
+  ['controls', 'focus-panel', 'map-legend'].forEach(id => {
+    const el = document.getElementById(id);
+    L.DomEvent.disableClickPropagation(el);
+    L.DomEvent.disableScrollPropagation(el);
+  });
+
+  // header chips
+  document.getElementById('chip-n').textContent = `${data.meta.n_total} tracts`;
+
+  // ── map click → place circle ──
+  map.on('click', e => {
+    if (circleLayer) {
+      // already placed → move it
+      centerLatLng = e.latlng;
+      circleLayer.setLatLng(e.latlng);
+    } else {
+      placeCircle(e.latlng);
+    }
+    updatePanel();
+    document.getElementById('map-hint').classList.add('hidden');
+  });
+
+  // ── radius slider ──
+  const slider = document.getElementById('radius-slider');
+  updateSliderGradient(slider);
+  slider.addEventListener('input', () => {
+    radiusM = +slider.value;
+    document.getElementById('radius-val').textContent = (radiusM / 1000).toFixed(1) + ' km';
+    document.getElementById('chip-r').textContent = (radiusM / 1000).toFixed(1) + ' km';
+    updateSliderGradient(slider);
+    if (circleLayer) { circleLayer.setRadius(radiusM); updatePanel(); }
+  });
+
+  // ── mode toggle ──
+  document.getElementById('btn-wshap').addEventListener('click', () => setMode('wshap'));
+  document.getElementById('btn-abshap').addEventListener('click', () => setMode('abshap'));
+
+  // ── close panel ──
+  document.getElementById('fp-close').addEventListener('click', removeCircle);
+
+  // ── update panel position on map move/zoom ──
+  map.on('move zoom', positionPanel);
+}
+
+// ── place draggable circle ──────────────────────────────────────────
+function placeCircle(latlng) {
+  centerLatLng = latlng;
+
+  circleLayer = L.circle(latlng, {
+    radius:      radiusM,
+    color:       '#3b5bdb',
+    weight:      2,
+    fillColor:   '#3b5bdb',
+    fillOpacity: 0.08,
+    className:   'focus-ring'
+  }).addTo(map);
+
+  // Make circle draggable via mousedown on the fill
+  circleLayer.on('mousedown', startDrag);
+
+  document.getElementById('focus-panel').classList.remove('hidden');
+  document.getElementById('chip-r').textContent = (radiusM / 1000).toFixed(1) + ' km';
+}
+
+// ── drag logic ─────────────────────────────────────────────────────
+let _dragging = false;
+let _dragStart = null;
+
+function startDrag(e) {
+  if (!circleLayer) return;
+  _dragging  = true;
+  _dragStart = e.latlng;
+  map.dragging.disable();
+
+  const onMove = ev => {
+    if (!_dragging) return;
+    centerLatLng = ev.latlng;
+    circleLayer.setLatLng(ev.latlng);
+    positionPanel();
+    updatePanel();
+  };
+  const onUp = () => {
+    _dragging = false;
+    map.dragging.enable();
+    map.off('mousemove', onMove);
+    map.off('mouseup',   onUp);
+  };
+  map.on('mousemove', onMove);
+  map.on('mouseup',   onUp);
+  L.DomEvent.stopPropagation(e);
+}
+
+// ── aggregation ────────────────────────────────────────────────────
+function aggregateInCircle() {
+  if (!centerLatLng) return null;
+
+  const cLat = centerLatLng.lat;
+  const cLon = centerLatLng.lng;
+  const rDeg  = radiusM * DEG_PER_METER;        // circle radius in degrees
+  const sigma  = rDeg / 2;                       // Gaussian σ = r/2
+
+  const inCircle = [];
+  for (const pt of data.points) {
+    const dLat = pt.lat - cLat;
+    const dLon = (pt.lon - cLon) * Math.cos(cLat * Math.PI / 180);
+    const dist  = Math.sqrt(dLat * dLat + dLon * dLon);
+    if (dist > rDeg) continue;
+    const w = Math.exp(-(dist * dist) / (2 * sigma * sigma));
+    inCircle.push({ pt, w, dist });
+  }
+
+  if (inCircle.length === 0) return { n: 0, features: {} };
+
+  const sumW = inCircle.reduce((s, d) => s + d.w, 0);
+
+  const result = {};
+  for (const f of features) {
+    let wSumShap = 0, wSumAbsShap = 0, wSumPred = 0, wSumUncert = 0;
+    for (const { pt, w } of inCircle) {
+      const fd = pt.features[f];
+      wSumShap    += w * fd.shap;
+      wSumAbsShap += w * Math.abs(fd.shap);
+      wSumPred    += w * fd.pred;
+      wSumUncert  += w * fd.geo_uncertainty;
+    }
+    result[f] = {
+      wshap:     wSumShap    / sumW,
+      abshap:    wSumAbsShap / sumW,
+      pred:      wSumPred    / sumW,
+      uncert:    wSumUncert  / sumW,
+    };
+  }
+
+  return { n: inCircle.length, features: result };
+}
+
+// ── render panel ───────────────────────────────────────────────────
+function updatePanel() {
+  const agg = aggregateInCircle();
+  if (!agg || !agg.n) {
+    document.getElementById('fp-body').innerHTML =
+      '<div class="fp-empty">No data points in this area.<br>Try increasing the radius.</div>';
+    document.getElementById('fp-meta').textContent = '0 tracts';
+    positionPanel();
+    return;
+  }
+
+  document.getElementById('fp-meta').textContent =
+    `${agg.n} tracts · ${(radiusM / 1000).toFixed(1)} km radius`;
+
+  // Sort features by mean|SHAP| descending
+  const sorted = features
+    .map(f => ({ f, ...agg.features[f] }))
+    .sort((a, b) => b.abshap - a.abshap);
+
+  const primaryVals = sorted.map(d => showMode === 'wshap' ? d.wshap : d.abshap);
+  const maxAbs = d3.max(primaryVals.map(Math.abs)) || 1;
+
+  const rows = sorted.map(d => {
+    const val    = showMode === 'wshap' ? d.wshap : d.abshap;
+    const isPos  = val >= 0;
+    const barW   = Math.abs(val) / maxAbs;  // [0,1]
+    const uncW   = d.uncert / maxAbs;
+
+    // In signed mode: bar goes left or right of center
+    // In magnitude mode: bar always goes right from 0
+    const TRACK  = 100; // % track width
+    const CENTER = showMode === 'wshap' ? 50 : 0;  // % position of zero
+
+    let barLeft, barPct, uncLeft, uncPct;
+    if (showMode === 'wshap') {
+      barPct  = barW * 50;
+      barLeft = isPos ? CENTER : CENTER - barPct;
+      // uncertainty shown as extensions on both sides of bar
+      uncPct  = uncW * 50;
+      uncLeft = barLeft - uncPct;
+    } else {
+      barPct  = barW * 100;
+      barLeft = 0;
+      uncPct  = Math.min(uncW * 100, 100 - barPct);
+      uncLeft = barPct;
+    }
+
+    const color   = showMode === 'wshap' ? (isPos ? '#dc2626' : '#2563eb') : '#6366f1';
+    const valText = (val >= 0 ? '+' : '') + fmt$(val);
+
+    return `
+      <div class="bar-row">
+        <span class="bar-label" title="${featureLabels[d.f]}">${featureLabels[d.f]}</span>
+        <div class="bar-track">
+          ${showMode === 'wshap' ? `<div class="bar-center" style="left:50%"></div>` : ''}
+          <div class="bar-uncert"
+               style="background:#d97706;left:${uncLeft.toFixed(1)}%;width:${(uncPct + barPct).toFixed(1)}%">
+          </div>
+          <div class="bar-fill"
+               style="background:${color};left:${barLeft.toFixed(1)}%;width:${barPct.toFixed(1)}%">
+          </div>
+        </div>
+        <span class="bar-val">${valText}</span>
+      </div>`;
+  }).join('');
+
+  document.getElementById('fp-body').innerHTML = rows;
+  positionPanel();
+}
+
+// ── position panel relative to circle ──────────────────────────────
+function positionPanel() {
+  if (!circleLayer || !centerLatLng) return;
+
+  const panel   = document.getElementById('focus-panel');
+  const mapEl   = document.getElementById('map');
+  const mapRect = mapEl.getBoundingClientRect();
+
+  // Get circle edge screen point (east side)
+  const edgeLon   = centerLatLng.lng + (radiusM * DEG_PER_METER / Math.cos(centerLatLng.lat * Math.PI / 180));
+  const edgePt    = map.latLngToContainerPoint(L.latLng(centerLatLng.lat, edgeLon));
+  const centerPt  = map.latLngToContainerPoint(centerLatLng);
+
+  const panelW    = PANEL_W;
+  const panelH    = panel.offsetHeight;
+  const mapW      = mapRect.width;
+  const mapH      = mapRect.height;
+
+  // Try right side
+  let left = edgePt.x + PANEL_OFFSET;
+  let top  = centerPt.y - panelH / 2;
+
+  // Flip left if would overflow right edge
+  if (left + panelW > mapW - 10) {
+    const edgeWest = centerLatLng.lng - (radiusM * DEG_PER_METER / Math.cos(centerLatLng.lat * Math.PI / 180));
+    const edgePtW  = map.latLngToContainerPoint(L.latLng(centerLatLng.lat, edgeWest));
+    left = edgePtW.x - PANEL_OFFSET - panelW;
+  }
+
+  // Clamp vertically
+  top = Math.max(10, Math.min(mapH - panelH - 10, top));
+  left = Math.max(10, left);
+
+  panel.style.left = left + 'px';
+  panel.style.top  = top + 'px';
+}
+
+// ── remove circle ──────────────────────────────────────────────────
+function removeCircle() {
+  if (circleLayer) { map.removeLayer(circleLayer); circleLayer = null; }
+  centerLatLng = null;
+  document.getElementById('focus-panel').classList.add('hidden');
+  document.getElementById('map-hint').classList.remove('hidden');
+}
+
+// ── legend ─────────────────────────────────────────────────────────
+function buildLegend(colorScale, min, max) {
+  const grad = document.getElementById('legend-grad');
+  const stops = d3.range(0, 1.01, 0.1)
+    .map(t => colorScale(min + t * (max - min))).join(',');
+  grad.style.background = `linear-gradient(to right, ${stops})`;
+  document.getElementById('leg-min').textContent = fmt$(min);
+  document.getElementById('leg-max').textContent = fmt$(max);
+}
+
+// ── helpers ────────────────────────────────────────────────────────
+function setMode(mode) {
+  showMode = mode;
+  document.getElementById('btn-wshap' ).classList.toggle('active', mode === 'wshap');
+  document.getElementById('btn-abshap').classList.toggle('active', mode === 'abshap');
+  if (circleLayer) updatePanel();
+}
+
+function fmt$(v) {
+  const abs = Math.abs(v);
+  if (abs >= 1000) return (v < 0 ? '-' : '') + '$' + (abs / 1000).toFixed(0) + 'k';
+  return '$' + Math.round(v);
+}
+
+function updateSliderGradient(el) {
+  const pct = ((el.value - el.min) / (el.max - el.min) * 100).toFixed(1);
+  el.style.setProperty('--pct', pct + '%');
+}
+
+// ── boot ───────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
