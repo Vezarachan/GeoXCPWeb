@@ -158,14 +158,6 @@
       <input type="range" id="radius-slider" min="200" max="5000" step="50" value="1000">
       <span class="ctrl-value" id="radius-val">1.0 km</span>
     </div>
-    <div class="ctrl-divider"></div>
-    <div class="ctrl-group">
-      <span class="ctrl-label">Bar color</span>
-      <div class="toggle-group">
-        <button class="toggle-btn active" id="btn-signed">SHAP direction</button>
-        <button class="toggle-btn"        id="btn-feature">Feature color</button>
-      </div>
-    </div>
   </div>
 </div>
 
@@ -206,7 +198,6 @@ const SHORT = {
 let data, features, featureLabels;
 let map, circleLayer, centerLatLng;
 let radiusM   = 1000;
-let colorMode = 'signed';
 let currentAgg = null;
 let hoveredIdx = null;   // which feature slice is expanded
 let sortedFeatures = []; // cached sorted feature list
@@ -308,8 +299,6 @@ function init() {
     if (circleLayer) { circleLayer.setRadius(radiusM); onCircleUpdate(); }
   });
 
-  document.getElementById('btn-signed').addEventListener('click',  () => setColorMode('signed'));
-  document.getElementById('btn-feature').addEventListener('click', () => setColorMode('feature'));
 }
 
 // ── circle ────────────────────────────────────────────────
@@ -442,7 +431,7 @@ function redrawRadial() {
     .endAngle(d => d.endAngle);
 
   const sliceData = sortedFeatures.map((d, i) => ({
-    ...d, ...angles[i], idx: i, color: getColor(d, i)
+    ...d, ...angles[i], idx: i, color: getColor(i)
   }));
 
   svg.selectAll('*').remove();
@@ -534,12 +523,9 @@ function redrawRadial() {
     const sg = g.append('g')
       .attr('transform', `translate(${shapLx},${shapLy}) rotate(${shapFlip ? shapRot + 180 : shapRot})`)
       .style('pointer-events', 'none');
-    sg.append('text').attr('text-anchor', 'middle').attr('dy', '-0.55em')
+    sg.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
       .attr('font-size', 10).attr('font-weight', 700).attr('font-family', 'Inter, sans-serif')
-      .attr('fill', d.wshap >= 0 ? '#7c3aed' : '#0891b2')
-      .text((d.wshap >= 0 ? '+' : '') + fmt$(d.wshap));
-    sg.append('text').attr('text-anchor', 'middle').attr('dy', '0.75em')
-      .attr('font-size', 9).attr('font-family', 'Inter, sans-serif').attr('fill', '#475569')
+      .attr('fill', getColor(d.idx))
       .text(fmt$(d.abshap));
 
     // Uncertainty value — centered in right sub-arc at mid-height
@@ -586,16 +572,14 @@ function showTooltip(d, event) {
   const maxUncert = d3.max(sortedFeatures, x => x.uncert) || 1;
   const barPct    = (d.abshap / maxAbs) * 100;
   const uncPct    = (d.uncert / maxUncert) * 100;
-  const dir       = d.wshap >= 0 ? '#7c3aed' : '#0891b2';
-  const signStr   = (d.wshap >= 0 ? '+' : '') + fmt$(d.wshap);
+  const i         = sortedFeatures.indexOf(d);
 
   document.getElementById('radial-tooltip').innerHTML = `
     <div class="tt-name">${featureLabels[d.f]}</div>
-    <div class="tt-row"><span>Weighted SHAP</span><span class="tt-val" style="color:${dir}">${signStr}</span></div>
     <div class="tt-row"><span>Mean |SHAP|</span><span class="tt-val">${fmt$(d.abshap)}</span></div>
     <div class="tt-bar-wrap">
       <div class="tt-bar-label">Mean |SHAP| (relative)</div>
-      <div class="tt-bar-track"><div class="tt-bar-fill" style="width:${barPct.toFixed(1)}%;background:${getColor(d, sortedFeatures.indexOf(d))}"></div></div>
+      <div class="tt-bar-track"><div class="tt-bar-fill" style="width:${barPct.toFixed(1)}%;background:${getColor(i)}"></div></div>
     </div>
     <div class="tt-bar-wrap">
       <div class="tt-bar-label">Geo-uncertainty ±${fmt$(d.uncert)}</div>
@@ -628,20 +612,12 @@ function updateRadialLegend() {
   html += `<div class="rl-section">
     <div class="rl-section-title">Left arc — Mean |SHAP|</div>`;
   html += `<div class="rl-row" style="font-size:10.5px;color:var(--muted)">Arc length = feature importance</div>`;
-  if (colorMode === 'signed') {
-    html += `
-    <div class="rl-row" style="margin-top:4px"><span class="rl-swatch" style="background:#7c3aed"></span>Positive Weighted SHAP</div>
-    <div class="rl-row"><span class="rl-swatch" style="background:#0891b2"></span>Negative Weighted SHAP</div>`;
-  } else {
-    // Feature color mode: list up to 6 features with palette colors, then "..."
-    const limit = Math.min(sortedFeatures.length, 6);
-    for (let i = 0; i < limit; i++) {
-      const d = sortedFeatures[i];
-      const c = PALETTE[i % PALETTE.length];
-      html += `<div class="rl-row"><span class="rl-swatch" style="background:${c}"></span>${SHORT[d.f] || d.f}</div>`;
-    }
-    if (sortedFeatures.length > 6) html += `<div class="rl-row" style="color:var(--light);font-size:10px">…${sortedFeatures.length - 6} more features</div>`;
+  const limit = Math.min(sortedFeatures.length, 6);
+  for (let i = 0; i < limit; i++) {
+    const d = sortedFeatures[i];
+    html += `<div class="rl-row"><span class="rl-swatch" style="background:${getColor(i)}"></span>${SHORT[d.f] || d.f}</div>`;
   }
+  if (sortedFeatures.length > 6) html += `<div class="rl-row" style="color:var(--light);font-size:10px">…${sortedFeatures.length - 6} more features</div>`;
   html += `</div>`;
 
   // Section 2: Uncertainty arc (right half)
@@ -674,20 +650,8 @@ function updateRadialLegend() {
 function drawBandLegend(svg, cx, cy, rPx) {}
 
 // ── color ─────────────────────────────────────────────────
-function getColor(d, i) {
-  if (colorMode === 'signed') {
-    // Use purple/teal instead of red/blue — avoids clashing with the YlOrRd income dots
-    return d.wshap >= 0 ? '#7c3aed' : '#0891b2';
-  }
+function getColor(i) {
   return PALETTE[i % PALETTE.length];
-}
-
-function setColorMode(mode) {
-  colorMode = mode;
-  document.getElementById('btn-signed').classList.toggle('active',  mode === 'signed');
-  document.getElementById('btn-feature').classList.toggle('active', mode === 'feature');
-  updateRadialLegend();
-  if (circleLayer) redrawRadial();
 }
 
 // ── legend ─────────────────────────────────────────────────
