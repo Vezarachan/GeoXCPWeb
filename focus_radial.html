@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NYC Income SHAP | Radial Focus Explorer</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --primary: #3b5bdb; --bg: #f1f5f9; --card: #ffffff;
+      --border: #e2e8f0; --text: #1e293b; --muted: #64748b; --light: #94a3b8;
+    }
+    body { font-family: 'Inter', sans-serif; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+
+    /* ── HEADER ── */
+    .header { height: 52px; background: var(--card); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 20px; gap: 14px; z-index: 1000; flex-shrink: 0; }
+    .logo-badge { background: var(--primary); color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px; letter-spacing: .5px; }
+    .header-title { font-size: 15px; font-weight: 600; }
+    .header-sub   { font-size: 12px; color: var(--muted); }
+    .header-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+    .chip { background: var(--bg); border: 1px solid var(--border); border-radius: 20px; padding: 3px 10px; font-size: 11px; color: var(--muted); font-weight: 500; }
+
+    /* ── MAP ── */
+    #map { flex: 1; position: relative; }
+
+    /* ── RADIAL SVG OVERLAY ── */
+    #radial-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 500; overflow: visible; }
+
+    /* ── HOVER TOOLTIP ── */
+    .radial-tooltip {
+      position: fixed;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 13px;
+      box-shadow: 0 6px 24px rgba(0,0,0,.14);
+      font-size: 12px;
+      pointer-events: none;
+      z-index: 2000;
+      min-width: 180px;
+      transition: opacity .1s;
+    }
+    .radial-tooltip.hidden { opacity: 0; }
+    .tt-name { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 7px; border-bottom: 1px solid var(--border); padding-bottom: 5px; }
+    .tt-row  { display: flex; justify-content: space-between; gap: 16px; margin-top: 4px; font-size: 11.5px; color: var(--muted); }
+    .tt-val  { font-weight: 700; font-size: 12px; }
+    .tt-bar-wrap { margin-top: 6px; }
+    .tt-bar-label { font-size: 10px; color: var(--muted); margin-bottom: 2px; }
+    .tt-bar-track { background: var(--bg); border-radius: 3px; height: 6px; overflow: hidden; position: relative; }
+    .tt-bar-fill  { position: absolute; top: 0; bottom: 0; border-radius: 3px; transition: width .2s; }
+    .tt-uncert-track { background: var(--bg); border-radius: 3px; height: 4px; overflow: hidden; position: relative; margin-top: 3px; }
+    .tt-footer { margin-top: 7px; font-size: 10px; color: var(--light); border-top: 1px solid var(--border); padding-top: 5px; }
+
+    /* ── CONTROLS (bottom) ── */
+    .controls {
+      position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 12px 20px; display: flex; align-items: center; gap: 20px;
+      box-shadow: 0 4px 20px rgba(0,0,0,.12); z-index: 800; min-width: 420px;
+    }
+    .ctrl-group { display: flex; align-items: center; gap: 8px; }
+    .ctrl-label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; white-space: nowrap; }
+    .ctrl-value { font-size: 12px; font-weight: 600; color: var(--primary); min-width: 52px; }
+    input[type=range] {
+      -webkit-appearance: none; width: 140px; height: 4px;
+      background: linear-gradient(to right, var(--primary) var(--pct,30%), var(--border) var(--pct,30%));
+      border-radius: 2px; outline: none; cursor: pointer;
+    }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; background: var(--primary); border-radius: 50%; box-shadow: 0 1px 4px rgba(59,91,219,.4); }
+    .toggle-group { display: flex; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+    .toggle-btn { padding: 5px 10px; font-size: 11px; font-weight: 600; cursor: pointer; border: none; background: transparent; color: var(--muted); transition: all .15s; white-space: nowrap; }
+    .toggle-btn.active { background: var(--primary); color: #fff; }
+    .ctrl-divider { width: 1px; height: 24px; background: var(--border); }
+
+    /* ── MAP HINT ── */
+    .map-hint { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); background: rgba(30,41,59,.85); color: #fff; font-size: 12px; font-weight: 500; padding: 8px 16px; border-radius: 20px; pointer-events: none; z-index: 800; transition: opacity .4s; }
+    .map-hint.hidden { opacity: 0; }
+
+    /* ── LEGEND ── */
+    .map-legend { position: absolute; right: 12px; top: 12px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; z-index: 800; min-width: 140px; }
+    .legend-title { font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 6px; }
+    .legend-grad  { width: 100%; height: 8px; border-radius: 4px; margin-bottom: 4px; }
+    .legend-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); }
+
+    /* ── NO DATA ── */
+    #no-data { position: absolute; inset: 0; background: rgba(241,245,249,.96); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 2000; gap: 12px; }
+    #no-data h2 { font-size: 18px; }
+    #no-data p  { font-size: 13px; color: var(--muted); text-align: center; max-width: 400px; line-height: 1.6; }
+    #no-data code { background: #1e293b; color: #94d82d; padding: 8px 16px; border-radius: 6px; font-size: 12px; display: block; margin-top: 4px; }
+  </style>
+</head>
+<body>
+
+<header class="header">
+  <span class="logo-badge">GeoXCP</span>
+  <div>
+    <div class="header-title">NYC Median Income — Radial Focus Explorer</div>
+    <div class="header-sub">Click map to place Focus Circle · Drag to move · Hover bars for details</div>
+  </div>
+  <div class="header-right">
+    <span class="chip" id="chip-n">— tracts</span>
+    <span class="chip" id="chip-r">— radius</span>
+  </div>
+</header>
+
+<div id="map">
+  <!-- no-data -->
+  <div id="no-data">
+    <h2>Data not found</h2>
+    <p>Run the data generation script first, then serve this file:</p>
+    <code>/opt/anaconda3/envs/UncertaintyGeoXAI/bin/python generate_data_nyc.py</code>
+    <code>python3 -m http.server 8765</code>
+  </div>
+
+  <!-- SVG overlay for radial bars -->
+  <svg id="radial-svg"></svg>
+
+  <!-- Hover tooltip -->
+  <div class="radial-tooltip hidden" id="radial-tooltip"></div>
+
+  <!-- Map hint -->
+  <div class="map-hint" id="map-hint">Click anywhere on the map to place a Focus Circle</div>
+
+  <!-- Income legend -->
+  <div class="map-legend" id="map-legend" style="display:none">
+    <div class="legend-title">Median Income</div>
+    <div class="legend-grad" id="legend-grad"></div>
+    <div class="legend-labels"><span id="leg-min">—</span><span id="leg-max">—</span></div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls" id="controls" style="display:none">
+    <div class="ctrl-group">
+      <span class="ctrl-label">Radius</span>
+      <input type="range" id="radius-slider" min="200" max="5000" step="50" value="1000">
+      <span class="ctrl-value" id="radius-val">1.0 km</span>
+    </div>
+    <div class="ctrl-divider"></div>
+    <div class="ctrl-group">
+      <span class="ctrl-label">Bar color</span>
+      <div class="toggle-group">
+        <button class="toggle-btn active" id="btn-signed">SHAP direction</button>
+        <button class="toggle-btn"        id="btn-feature">Feature color</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="data/results_nyc.js"></script>
+
+<script>
+'use strict';
+
+// ── constants ─────────────────────────────────────────────
+const EXCLUDE   = new Set(['lon', 'lat']);
+const DEG_PER_M = 1 / 111000;
+const MAX_SPOKES = 12;        // show top-N features
+const BAR_MULT   = 1.4;       // max bar = circle radius × BAR_MULT (beyond edge)
+const BAR_W      = 6;         // bar stroke-width (normal)
+const BAR_W_HOV  = 11;        // bar stroke-width (hover)
+
+// 12 distinct feature colors (used in "feature color" mode)
+const PALETTE = [
+  '#e63946','#2a9d8f','#e9c46a','#f4a261','#264653',
+  '#a8dadc','#457b9d','#1d3557','#6a994e','#bc4749',
+  '#e76f51','#2b9348'
+];
+
+// Short labels for radial display
+const SHORT = {
+  UNEMP_RATE:'Unemploy.', gini:'Gini', profes_p:'Profession',
+  master_p:"Master's", labor_part_p:'Labor Part.', popover18_p:'Pop.>18',
+  male_p:'Male', european_p:'White', asian_p:'Asian', african_p:'African',
+  hispanic_p:'Hispanic', highschool_p:'Hi.School', bachelor_p:"Bachelor's",
+  doctorate_p:'Doctorate', pub_assist_p:'Pub.Assist', long_commute_p:'Commute',
+  dropout_p:'Dropout', medianage:'Med.Age', popdty:'Pop.Density'
+};
+
+// ── state ─────────────────────────────────────────────────
+let data, features, featureLabels;
+let map, circleLayer, centerLatLng;
+let radiusM  = 1000;
+let colorMode = 'signed';   // 'signed' | 'feature'
+let currentAgg = null;
+
+// ── init ──────────────────────────────────────────────────
+function init() {
+  if (typeof window.GeoXCPDataNYC === 'undefined') return;
+  document.getElementById('no-data').style.display = 'none';
+
+  data          = window.GeoXCPDataNYC;
+  features      = data.features.filter(f => !EXCLUDE.has(f));
+  featureLabels = data.feature_labels;
+
+  // Leaflet map
+  map = L.map('map', { zoomControl: true }).setView([40.73, -73.98], 11);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap © CARTO', subdomains: 'abcd', maxZoom: 19
+  }).addTo(map);
+
+  // Color scale for tract dots
+  const incomes = data.points.map(p => p.income);
+  const iMin = d3.quantile(incomes.slice().sort(d3.ascending), 0.02);
+  const iMax = d3.quantile(incomes.slice().sort(d3.ascending), 0.98);
+  const cScale = d3.scaleSequential(d3.interpolateYlOrRd).domain([iMin, iMax]);
+
+  // Draw tract dots
+  const layer = L.layerGroup().addTo(map);
+  data.points.forEach(pt => {
+    L.circleMarker([pt.lat, pt.lon], {
+      radius: 4, fillColor: cScale(pt.income),
+      color: '#fff', weight: 0.5, fillOpacity: 0.8
+    }).bindTooltip(`<b>${fmt$(pt.income)}</b> median income`, { sticky: true })
+      .addTo(layer);
+  });
+
+  buildLegend(cScale, iMin, iMax);
+  document.getElementById('map-legend').style.display = '';
+  document.getElementById('controls').style.display   = '';
+  document.getElementById('chip-n').textContent = `${data.meta.n_total} tracts`;
+
+  // Block click propagation from overlays
+  ['controls','map-legend'].forEach(id => {
+    const el = document.getElementById(id);
+    L.DomEvent.disableClickPropagation(el);
+    L.DomEvent.disableScrollPropagation(el);
+  });
+
+  // Map click → place/move circle
+  map.on('click', e => {
+    if (circleLayer) { circleLayer.setLatLng(e.latlng); }
+    else             { placeCircle(e.latlng); }
+    centerLatLng = e.latlng;
+    onCircleUpdate();
+    document.getElementById('map-hint').classList.add('hidden');
+  });
+
+  // Redraw spokes on pan/zoom (positions change, data same)
+  map.on('move zoom', redrawSpokes);
+
+  // Radius slider
+  const slider = document.getElementById('radius-slider');
+  updateGrad(slider);
+  slider.addEventListener('input', () => {
+    radiusM = +slider.value;
+    document.getElementById('radius-val').textContent = (radiusM / 1000).toFixed(1) + ' km';
+    document.getElementById('chip-r').textContent     = (radiusM / 1000).toFixed(1) + ' km';
+    updateGrad(slider);
+    if (circleLayer) { circleLayer.setRadius(radiusM); onCircleUpdate(); }
+  });
+
+  // Mode toggle
+  document.getElementById('btn-signed').addEventListener('click',  () => setColorMode('signed'));
+  document.getElementById('btn-feature').addEventListener('click', () => setColorMode('feature'));
+}
+
+// ── place circle ──────────────────────────────────────────
+function placeCircle(latlng) {
+  centerLatLng = latlng;
+  circleLayer  = L.circle(latlng, {
+    radius: radiusM, color: '#3b5bdb', weight: 1.5,
+    fillColor: '#3b5bdb', fillOpacity: 0.05
+  }).addTo(map);
+  circleLayer.on('mousedown', startDrag);
+}
+
+// ── drag ──────────────────────────────────────────────────
+function startDrag(e) {
+  map.dragging.disable();
+  const onMove = ev => { centerLatLng = ev.latlng; circleLayer.setLatLng(ev.latlng); redrawSpokes(); };
+  const onUp   = ()  => { map.dragging.enable(); map.off('mousemove', onMove); map.off('mouseup', onUp); onCircleUpdate(); };
+  map.on('mousemove', onMove);
+  map.on('mouseup', onUp);
+  L.DomEvent.stopPropagation(e);
+}
+
+// ── aggregation (same as focus_circle.html) ───────────────
+function aggregateInCircle() {
+  if (!centerLatLng) return null;
+  const cLat = centerLatLng.lat, cLon = centerLatLng.lng;
+  const rDeg = radiusM * DEG_PER_M;
+  const sigma = rDeg / 2;
+  const pts = [];
+  for (const pt of data.points) {
+    const dLat = pt.lat - cLat;
+    const dLon = (pt.lon - cLon) * Math.cos(cLat * Math.PI / 180);
+    const d = Math.sqrt(dLat * dLat + dLon * dLon);
+    if (d > rDeg) continue;
+    pts.push({ pt, w: Math.exp(-d * d / (2 * sigma * sigma)) });
+  }
+  if (!pts.length) return { n: 0, features: {} };
+  const sumW = pts.reduce((s, d) => s + d.w, 0);
+  const res = {};
+  for (const f of features) {
+    let sw = 0, sa = 0, su = 0;
+    for (const { pt, w } of pts) {
+      const fd = pt.features[f];
+      sw += w * fd.shap;
+      sa += w * Math.abs(fd.shap);
+      su += w * fd.geo_uncertainty;
+    }
+    res[f] = { wshap: sw / sumW, abshap: sa / sumW, uncert: su / sumW };
+  }
+  return { n: pts.length, features: res };
+}
+
+// ── recompute agg + redraw ────────────────────────────────
+function onCircleUpdate() {
+  currentAgg = aggregateInCircle();
+  redrawSpokes();
+}
+
+// ── compute screen geometry ───────────────────────────────
+function circleScreenGeom() {
+  const cPx = map.latLngToContainerPoint(centerLatLng);
+  const ePx = map.latLngToContainerPoint(
+    L.latLng(centerLatLng.lat,
+      centerLatLng.lng + (radiusM * DEG_PER_M) / Math.cos(centerLatLng.lat * Math.PI / 180))
+  );
+  return { cx: cPx.x, cy: cPx.y, rPx: Math.hypot(ePx.x - cPx.x, ePx.y - cPx.y) };
+}
+
+// ── draw radial spokes ────────────────────────────────────
+function redrawSpokes() {
+  const svg = d3.select('#radial-svg');
+  svg.selectAll('*').remove();
+  if (!circleLayer || !centerLatLng || !currentAgg || !currentAgg.n) return;
+
+  const { cx, cy, rPx } = circleScreenGeom();
+  const MAX_LEN = rPx * BAR_MULT;
+  const agg = currentAgg;
+
+  const sorted = features
+    .map(f => ({ f, ...agg.features[f] }))
+    .sort((a, b) => b.abshap - a.abshap)
+    .slice(0, MAX_SPOKES);
+
+  const maxAbs    = d3.max(sorted, d => d.abshap) || 1;
+  const maxUncert = d3.max(sorted, d => d.uncert) || 1;
+
+  // Draw circle ring
+  svg.append('circle')
+    .attr('cx', cx).attr('cy', cy).attr('r', rPx)
+    .attr('fill', 'none').attr('stroke', '#3b5bdb')
+    .attr('stroke-width', 1.5).attr('opacity', 0.55);
+
+  // Drag handle (crosshair at center)
+  [0, 90].forEach(deg => {
+    const rad = deg * Math.PI / 180;
+    const hw = rPx * 0.12;
+    svg.append('line')
+      .attr('x1', cx - hw * Math.cos(rad)).attr('y1', cy - hw * Math.sin(rad))
+      .attr('x2', cx + hw * Math.cos(rad)).attr('y2', cy + hw * Math.sin(rad))
+      .attr('stroke', '#3b5bdb').attr('stroke-width', 1).attr('opacity', 0.4);
+  });
+
+  sorted.forEach((d, i) => {
+    const angle = (i / sorted.length) * 2 * Math.PI - Math.PI / 2;
+    const ca = Math.cos(angle), sa = Math.sin(angle);
+
+    const barLen  = (d.abshap  / maxAbs)    * MAX_LEN;
+    const uncLen  = (d.uncert  / maxUncert) * MAX_LEN * 0.35;
+
+    // Start: circle edge; end: bar tip
+    const sx = cx + rPx * ca,  sy = cy + rPx * sa;
+    const ex = sx + barLen * ca, ey = sy + barLen * sa;
+    const ux = ex + uncLen * ca, uy = ey + uncLen * sa;
+
+    const color = getColor(d, i);
+
+    const g = svg.append('g')
+      .attr('class', 'spoke')
+      .style('cursor', 'crosshair')
+      .style('pointer-events', 'all');
+
+    // Uncertainty extension (thin, faint)
+    g.append('line')
+      .attr('x1', ex).attr('y1', ey).attr('x2', ux).attr('y2', uy)
+      .attr('stroke', color).attr('stroke-width', 2.5)
+      .attr('opacity', 0.28).attr('stroke-linecap', 'round')
+      .style('pointer-events', 'none');
+
+    // Main bar
+    g.append('line')
+      .attr('x1', sx).attr('y1', sy).attr('x2', ex).attr('y2', ey)
+      .attr('stroke', color).attr('stroke-width', BAR_W)
+      .attr('opacity', 0.82).attr('stroke-linecap', 'round')
+      .attr('class', 'spoke-bar');
+
+    // Tip circle
+    g.append('circle')
+      .attr('cx', ex).attr('cy', ey).attr('r', 4)
+      .attr('fill', color).attr('opacity', 0.9)
+      .style('pointer-events', 'none');
+
+    // Rotated short label at tip
+    const angleDeg = angle * 180 / Math.PI;
+    const flip     = angleDeg > 90 && angleDeg < 270;
+    const labelRot = angleDeg + (flip ? 180 : 0);
+    const anchor   = flip ? 'end' : 'start';
+    const dx       = flip ? -10 : 10;
+    g.append('text')
+      .attr('x', ex).attr('y', ey)
+      .attr('transform', `rotate(${labelRot},${ex},${ey})`)
+      .attr('text-anchor', anchor)
+      .attr('dx', dx).attr('dy', '0.35em')
+      .attr('font-size', 9).attr('font-family', 'Inter, sans-serif')
+      .attr('fill', color).attr('opacity', 0.85)
+      .style('pointer-events', 'none')
+      .text(SHORT[d.f] || d.f);
+
+    // Invisible wide hit zone for hover
+    g.append('line')
+      .attr('x1', sx).attr('y1', sy).attr('x2', ex).attr('y2', ey)
+      .attr('stroke', 'transparent').attr('stroke-width', 18)
+      .style('pointer-events', 'stroke')
+      .on('mouseenter', function(event) { onSpokeEnter(event, d, color, maxAbs, maxUncert); })
+      .on('mousemove',  function(event) { moveTooltip(event); })
+      .on('mouseleave', function()      { onSpokeLeave(g); });
+  });
+}
+
+// ── hover ─────────────────────────────────────────────────
+function onSpokeEnter(event, d, color, maxAbs, maxUncert) {
+  // Highlight bar
+  d3.selectAll('.spoke-bar').attr('opacity', 0.2).attr('stroke-width', BAR_W);
+  event.currentTarget.parentNode.querySelector('.spoke-bar').setAttribute('opacity', 1);
+  event.currentTarget.parentNode.querySelector('.spoke-bar').setAttribute('stroke-width', BAR_W_HOV);
+
+  // Build tooltip
+  const signed  = d.wshap;
+  const mag     = d.abshap;
+  const barPct  = (mag / maxAbs) * 100;
+  const uncPct  = (d.uncert / maxUncert) * 100;
+  const signStr = (signed >= 0 ? '+' : '') + fmt$(signed);
+  const dir     = signed >= 0 ? '#dc2626' : '#2563eb';
+
+  document.getElementById('radial-tooltip').innerHTML = `
+    <div class="tt-name">${featureLabels[d.f]}</div>
+    <div class="tt-row">
+      <span>Weighted SHAP</span>
+      <span class="tt-val" style="color:${dir}">${signStr}</span>
+    </div>
+    <div class="tt-row">
+      <span>Mean |SHAP|</span>
+      <span class="tt-val">${fmt$(mag)}</span>
+    </div>
+    <div class="tt-bar-wrap">
+      <div class="tt-bar-label">Mean |SHAP| (relative)</div>
+      <div class="tt-bar-track">
+        <div class="tt-bar-fill" style="width:${barPct.toFixed(1)}%;background:${color}"></div>
+      </div>
+    </div>
+    <div class="tt-bar-wrap">
+      <div class="tt-bar-label">Geo-uncertainty ±${fmt$(d.uncert)}</div>
+      <div class="tt-uncert-track">
+        <div class="tt-bar-fill" style="width:${uncPct.toFixed(1)}%;background:#d97706"></div>
+      </div>
+    </div>
+    <div class="tt-footer">
+      ${currentAgg.n} tracts · ${(radiusM/1000).toFixed(1)} km radius · Gaussian weighted
+    </div>`;
+
+  document.getElementById('radial-tooltip').classList.remove('hidden');
+  moveTooltip(event);
+}
+
+function onSpokeLeave(g) {
+  d3.selectAll('.spoke-bar').attr('opacity', 0.82).attr('stroke-width', BAR_W);
+  document.getElementById('radial-tooltip').classList.add('hidden');
+}
+
+function moveTooltip(event) {
+  const tip = document.getElementById('radial-tooltip');
+  const tw = tip.offsetWidth, th = tip.offsetHeight;
+  let x = event.clientX + 14, y = event.clientY - 14;
+  if (x + tw > window.innerWidth  - 10) x = event.clientX - tw - 14;
+  if (y + th > window.innerHeight - 10) y = event.clientY - th + 14;
+  tip.style.left = x + 'px';
+  tip.style.top  = y + 'px';
+}
+
+// ── color helpers ─────────────────────────────────────────
+function getColor(d, i) {
+  if (colorMode === 'signed') return d.wshap >= 0 ? '#dc2626' : '#2563eb';
+  return PALETTE[i % PALETTE.length];
+}
+
+function setColorMode(mode) {
+  colorMode = mode;
+  document.getElementById('btn-signed').classList.toggle('active',  mode === 'signed');
+  document.getElementById('btn-feature').classList.toggle('active', mode === 'feature');
+  if (circleLayer) redrawSpokes();
+}
+
+// ── legend ────────────────────────────────────────────────
+function buildLegend(scale, min, max) {
+  const stops = d3.range(0, 1.01, 0.1).map(t => scale(min + t*(max-min))).join(',');
+  document.getElementById('legend-grad').style.background = `linear-gradient(to right,${stops})`;
+  document.getElementById('leg-min').textContent = fmt$(min);
+  document.getElementById('leg-max').textContent = fmt$(max);
+}
+
+// ── utils ─────────────────────────────────────────────────
+function fmt$(v) {
+  const a = Math.abs(v);
+  if (a >= 1000) return (v < 0 ? '-' : '') + '$' + (a/1000).toFixed(0) + 'k';
+  return '$' + Math.round(v);
+}
+function updateGrad(el) {
+  const p = ((el.value - el.min) / (el.max - el.min) * 100).toFixed(1);
+  el.style.setProperty('--pct', p + '%');
+}
+
+// ── boot ──────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
