@@ -222,6 +222,28 @@
       margin-bottom: 6px;
     }
 
+    .step-desc ul {
+      margin: 5px 0 4px 0;
+      padding-left: 14px;
+    }
+
+    .step-desc ul li {
+      margin-bottom: 2px;
+    }
+
+    .step-note {
+      font-size: 11px;
+      color: var(--text-light);
+      background: #f8fafc;
+      border-left: 2px solid var(--primary);
+      padding: 5px 8px;
+      border-radius: 0 4px 4px 0;
+      margin: 6px 0 4px;
+      line-height: 1.5;
+    }
+
+    .step-note strong { color: var(--text); font-weight: 600; }
+
     .step-stats {
       display: flex;
       flex-wrap: wrap;
@@ -734,9 +756,15 @@
             <span class="step-badge">MLP Regression</span>
           </div>
           <div class="step-desc">
-            A multi-layer perceptron (MLP) learns to predict SHAP values from house features + model
-            output. This enables SHAP prediction at any new location without re-running the full
-            SHAP computation.
+            A multi-layer perceptron (MLP) is trained to predict SHAP values from house features
+            and model output. Because SHAP values have <em>no observable ground truth</em>—they
+            describe model behavior, not physical reality—the MLP output
+            <strong>Ê[SHAP]</strong> serves as the reference (expected) SHAP value.
+          </div>
+          <div class="step-note">
+            In the <strong>Point Details</strong> chart: bars show <strong>Ê[SHAP]</strong>
+            with ±½ geo-conformal interval; the
+            <span style="color:#b45309">●</span> orange dot marks the actual TreeSHAP value.
           </div>
           <div class="feature-highlight">
             <div class="feature-highlight-title">Selected feature performance</div>
@@ -801,13 +829,20 @@
             <span class="step-badge">GeoXCP</span>
           </div>
           <div class="step-desc">
-            Each prediction is explained by SHAP values with geographically-calibrated confidence
-            intervals. Larger intervals reflect greater local uncertainty in the SHAP regression.
-            The map shows how explanation uncertainty varies spatially.
+            <strong>What is Spatial Explanation Uncertainty?</strong><br>
+            The reliability of a SHAP value at any location is jointly affected by three sources:
+            <ul>
+              <li><strong>Data</strong> — spatial heterogeneity and sampling gaps in training data</li>
+              <li><strong>Prediction model</strong> — XGBoost sensitivity to local feature patterns</li>
+              <li><strong>Explainability model</strong> — MLP regression error when estimating SHAP</li>
+            </ul>
+            GeoXCP wraps <em>geographically-weighted conformal prediction</em> around the SHAP
+            Predictor to produce location-aware intervals that absorb all three sources, with a
+            formal 90% coverage guarantee.
           </div>
           <div class="step-stats">
-            <span class="stat-pill"><span class="stat-label">Interpretation</span>
-              <span class="stat-value">SHAP ± geo-uncertainty</span></span>
+            <span class="stat-pill"><span class="stat-label">Output</span>
+              <span class="stat-value">Ê[SHAP] ± geo-uncertainty</span></span>
           </div>
         </div>
       </div>
