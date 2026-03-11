@@ -28,7 +28,7 @@
     /* ── RADIAL SVG OVERLAY ── */
     #radial-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 500; overflow: visible; }
 
-    /* ── HOVER TOOLTIP ── */
+    /* ── HOVER TOOLTIP (inline in expanded slice, no floating box) ── */
     .radial-tooltip {
       position: fixed;
       background: var(--card);
@@ -39,17 +39,17 @@
       font-size: 12px;
       pointer-events: none;
       z-index: 2000;
-      min-width: 180px;
-      transition: opacity .1s;
+      min-width: 190px;
+      transition: opacity .15s;
     }
-    .radial-tooltip.hidden { opacity: 0; }
+    .radial-tooltip.hidden { opacity: 0; pointer-events: none; }
     .tt-name { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 7px; border-bottom: 1px solid var(--border); padding-bottom: 5px; }
     .tt-row  { display: flex; justify-content: space-between; gap: 16px; margin-top: 4px; font-size: 11.5px; color: var(--muted); }
     .tt-val  { font-weight: 700; font-size: 12px; }
     .tt-bar-wrap { margin-top: 6px; }
     .tt-bar-label { font-size: 10px; color: var(--muted); margin-bottom: 2px; }
     .tt-bar-track { background: var(--bg); border-radius: 3px; height: 6px; overflow: hidden; position: relative; }
-    .tt-bar-fill  { position: absolute; top: 0; bottom: 0; border-radius: 3px; transition: width .2s; }
+    .tt-bar-fill  { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
     .tt-uncert-track { background: var(--bg); border-radius: 3px; height: 4px; overflow: hidden; position: relative; margin-top: 3px; }
     .tt-footer { margin-top: 7px; font-size: 10px; color: var(--light); border-top: 1px solid var(--border); padding-top: 5px; }
 
@@ -156,26 +156,32 @@
 'use strict';
 
 // ── constants ─────────────────────────────────────────────
-const EXCLUDE   = new Set(['lon', 'lat']);
-const DEG_PER_M = 1 / 111000;
-const MAX_SPOKES = 12;        // show top-N features
-const BAR_MULT   = 1.4;       // max bar = circle radius × BAR_MULT (beyond edge)
-const BAR_W      = 6;         // bar stroke-width (normal)
-const BAR_W_HOV  = 11;        // bar stroke-width (hover)
+const EXCLUDE    = new Set(['lon', 'lat']);
+const DEG_PER_M  = 1 / 111000;
+const MAX_SPOKES = 12;
 
-// 12 distinct feature colors (used in "feature color" mode)
+// Ring heights (px, fixed)
+const SHAP_H    = 80;   // max height of SHAP arc band
+const UNCERT_H  = 30;   // height of uncertainty arc band
+const BAND_GAP  = 8;    // gap between the two bands
+const LABEL_PAD = 10;   // padding after outer ring before label
+
+// Angular gap between slices (radians)
+const SLICE_GAP = 0.018;
+// Expansion factor for hovered slice
+const EXPAND_FACTOR = 4.0;
+
 const PALETTE = [
   '#e63946','#2a9d8f','#e9c46a','#f4a261','#264653',
   '#a8dadc','#457b9d','#1d3557','#6a994e','#bc4749',
   '#e76f51','#2b9348'
 ];
 
-// Short labels for radial display
 const SHORT = {
   UNEMP_RATE:'Unemploy.', gini:'Gini', profes_p:'Profession',
   master_p:"Master's", labor_part_p:'Labor Part.', popover18_p:'Pop.>18',
-  male_p:'Male', european_p:'White', asian_p:'Asian', african_p:'African',
-  hispanic_p:'Hispanic', highschool_p:'Hi.School', bachelor_p:"Bachelor's",
+  male_p:'Male %', european_p:'White %', asian_p:'Asian %', african_p:'African %',
+  hispanic_p:'Hispanic %', highschool_p:'Hi.School', bachelor_p:"Bachelor's",
   doctorate_p:'Doctorate', pub_assist_p:'Pub.Assist', long_commute_p:'Commute',
   dropout_p:'Dropout', medianage:'Med.Age', popdty:'Pop.Density'
 };
@@ -183,9 +189,11 @@ const SHORT = {
 // ── state ─────────────────────────────────────────────────
 let data, features, featureLabels;
 let map, circleLayer, centerLatLng;
-let radiusM  = 1000;
-let colorMode = 'signed';   // 'signed' | 'feature'
+let radiusM   = 1000;
+let colorMode = 'signed';
 let currentAgg = null;
+let hoveredIdx = null;   // which feature slice is expanded
+let sortedFeatures = []; // cached sorted feature list
 
 // ── init ──────────────────────────────────────────────────
 function init() {
@@ -196,19 +204,16 @@ function init() {
   features      = data.features.filter(f => !EXCLUDE.has(f));
   featureLabels = data.feature_labels;
 
-  // Leaflet map
   map = L.map('map', { zoomControl: true }).setView([40.73, -73.98], 11);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
     attribution: '© OpenStreetMap © CARTO', subdomains: 'abcd', maxZoom: 19
   }).addTo(map);
 
-  // Color scale for tract dots
   const incomes = data.points.map(p => p.income);
   const iMin = d3.quantile(incomes.slice().sort(d3.ascending), 0.02);
   const iMax = d3.quantile(incomes.slice().sort(d3.ascending), 0.98);
   const cScale = d3.scaleSequential(d3.interpolateYlOrRd).domain([iMin, iMax]);
 
-  // Draw tract dots
   const layer = L.layerGroup().addTo(map);
   data.points.forEach(pt => {
     L.circleMarker([pt.lat, pt.lon], {
@@ -223,14 +228,12 @@ function init() {
   document.getElementById('controls').style.display   = '';
   document.getElementById('chip-n').textContent = `${data.meta.n_total} tracts`;
 
-  // Block click propagation from overlays
   ['controls','map-legend'].forEach(id => {
     const el = document.getElementById(id);
     L.DomEvent.disableClickPropagation(el);
     L.DomEvent.disableScrollPropagation(el);
   });
 
-  // Map click → place/move circle
   map.on('click', e => {
     if (circleLayer) { circleLayer.setLatLng(e.latlng); }
     else             { placeCircle(e.latlng); }
@@ -239,10 +242,8 @@ function init() {
     document.getElementById('map-hint').classList.add('hidden');
   });
 
-  // Redraw spokes on pan/zoom (positions change, data same)
-  map.on('move zoom', redrawSpokes);
+  map.on('move zoom', redrawRadial);
 
-  // Radius slider
   const slider = document.getElementById('radius-slider');
   updateGrad(slider);
   slider.addEventListener('input', () => {
@@ -253,12 +254,11 @@ function init() {
     if (circleLayer) { circleLayer.setRadius(radiusM); onCircleUpdate(); }
   });
 
-  // Mode toggle
   document.getElementById('btn-signed').addEventListener('click',  () => setColorMode('signed'));
   document.getElementById('btn-feature').addEventListener('click', () => setColorMode('feature'));
 }
 
-// ── place circle ──────────────────────────────────────────
+// ── circle ────────────────────────────────────────────────
 function placeCircle(latlng) {
   centerLatLng = latlng;
   circleLayer  = L.circle(latlng, {
@@ -268,17 +268,16 @@ function placeCircle(latlng) {
   circleLayer.on('mousedown', startDrag);
 }
 
-// ── drag ──────────────────────────────────────────────────
 function startDrag(e) {
   map.dragging.disable();
-  const onMove = ev => { centerLatLng = ev.latlng; circleLayer.setLatLng(ev.latlng); redrawSpokes(); };
+  const onMove = ev => { centerLatLng = ev.latlng; circleLayer.setLatLng(ev.latlng); redrawRadial(); };
   const onUp   = ()  => { map.dragging.enable(); map.off('mousemove', onMove); map.off('mouseup', onUp); onCircleUpdate(); };
   map.on('mousemove', onMove);
   map.on('mouseup', onUp);
   L.DomEvent.stopPropagation(e);
 }
 
-// ── aggregation (same as focus_circle.html) ───────────────
+// ── aggregation ────────────────────────────────────────────
 function aggregateInCircle() {
   if (!centerLatLng) return null;
   const cLat = centerLatLng.lat, cLon = centerLatLng.lng;
@@ -308,13 +307,21 @@ function aggregateInCircle() {
   return { n: pts.length, features: res };
 }
 
-// ── recompute agg + redraw ────────────────────────────────
 function onCircleUpdate() {
   currentAgg = aggregateInCircle();
-  redrawSpokes();
+  hoveredIdx = null;
+  if (currentAgg && currentAgg.n) {
+    sortedFeatures = features
+      .map(f => ({ f, ...currentAgg.features[f] }))
+      .sort((a, b) => b.abshap - a.abshap)
+      .slice(0, MAX_SPOKES);
+  } else {
+    sortedFeatures = [];
+  }
+  redrawRadial();
 }
 
-// ── compute screen geometry ───────────────────────────────
+// ── screen geometry ────────────────────────────────────────
 function circleScreenGeom() {
   const cPx = map.latLngToContainerPoint(centerLatLng);
   const ePx = map.latLngToContainerPoint(
@@ -324,169 +331,276 @@ function circleScreenGeom() {
   return { cx: cPx.x, cy: cPx.y, rPx: Math.hypot(ePx.x - cPx.x, ePx.y - cPx.y) };
 }
 
-// ── draw radial spokes ────────────────────────────────────
-function redrawSpokes() {
+// ── angle layout ───────────────────────────────────────────
+// Returns array of {startAngle, endAngle, midAngle} for each feature
+function computeAngles(N, expandedIdx) {
+  const totalGap = N * SLICE_GAP;
+  const available = 2 * Math.PI - totalGap;
+
+  let baseAng, expandAng, compressAng;
+  if (expandedIdx === null || N <= 1) {
+    baseAng = available / N;
+    expandAng = baseAng;
+    compressAng = baseAng;
+  } else {
+    baseAng     = available / N;
+    expandAng   = Math.min(baseAng * EXPAND_FACTOR, available * 0.45);
+    compressAng = (available - expandAng) / (N - 1);
+  }
+
+  const angles = [];
+  let cur = -Math.PI / 2; // start at top
+  for (let i = 0; i < N; i++) {
+    const w = (expandedIdx !== null && i === expandedIdx) ? expandAng : compressAng;
+    const start = cur + SLICE_GAP / 2;
+    const end   = cur + w + SLICE_GAP / 2;
+    angles.push({ startAngle: start, endAngle: end, midAngle: (start + end) / 2 });
+    cur += w + SLICE_GAP;
+  }
+  return angles;
+}
+
+// ── main draw ──────────────────────────────────────────────
+function redrawRadial() {
   const svg = d3.select('#radial-svg');
-  svg.selectAll('*').remove();
-  if (!circleLayer || !centerLatLng || !currentAgg || !currentAgg.n) return;
+  if (!circleLayer || !centerLatLng || !sortedFeatures.length) {
+    svg.selectAll('*').remove();
+    return;
+  }
 
   const { cx, cy, rPx } = circleScreenGeom();
-  const MAX_LEN = rPx * BAR_MULT;
-  const agg = currentAgg;
+  const N = sortedFeatures.length;
+  const angles = computeAngles(N, hoveredIdx);
 
-  const sorted = features
-    .map(f => ({ f, ...agg.features[f] }))
-    .sort((a, b) => b.abshap - a.abshap)
-    .slice(0, MAX_SPOKES);
+  const maxAbs    = d3.max(sortedFeatures, d => d.abshap) || 1;
+  const maxUncert = d3.max(sortedFeatures, d => d.uncert) || 1;
 
-  const maxAbs    = d3.max(sorted, d => d.abshap) || 1;
-  const maxUncert = d3.max(sorted, d => d.uncert) || 1;
+  // ── arc generators ──
+  // SHAP band: rPx → rPx + SHAP_H  (height scaled by abshap)
+  // Uncert band: rPx + SHAP_H + BAND_GAP → rPx + SHAP_H + BAND_GAP + UNCERT_H (height scaled)
+  const shapArc = d3.arc()
+    .innerRadius(d => rPx)
+    .outerRadius(d => rPx + (d.abshap / maxAbs) * SHAP_H)
+    .startAngle(d => d.startAngle)
+    .endAngle(d => d.endAngle)
+    .padAngle(0)
+    .cornerRadius(2);
 
-  // Draw circle ring
+  const uncertArc = d3.arc()
+    .innerRadius(d => rPx + SHAP_H + BAND_GAP)
+    .outerRadius(d => rPx + SHAP_H + BAND_GAP + (d.uncert / maxUncert) * UNCERT_H)
+    .startAngle(d => d.startAngle)
+    .endAngle(d => d.endAngle)
+    .padAngle(0)
+    .cornerRadius(2);
+
+  // Hit zone arc (full height, for mouse interaction)
+  const hitArc = d3.arc()
+    .innerRadius(rPx)
+    .outerRadius(rPx + SHAP_H + BAND_GAP + UNCERT_H + LABEL_PAD)
+    .startAngle(d => d.startAngle)
+    .endAngle(d => d.endAngle)
+    .padAngle(0);
+
+  // ── build data with angles ──
+  const sliceData = sortedFeatures.map((d, i) => ({
+    ...d, ...angles[i], idx: i,
+    color: getColor(d, i)
+  }));
+
+  // ── bind / enter / update ──
+  svg.selectAll('*').remove();
+
+  // Reference circle
   svg.append('circle')
     .attr('cx', cx).attr('cy', cy).attr('r', rPx)
     .attr('fill', 'none').attr('stroke', '#3b5bdb')
-    .attr('stroke-width', 1.5).attr('opacity', 0.55);
+    .attr('stroke-width', 1.5).attr('opacity', 0.5);
 
-  // Drag handle (crosshair at center)
-  [0, 90].forEach(deg => {
-    const rad = deg * Math.PI / 180;
-    const hw = rPx * 0.12;
-    svg.append('line')
-      .attr('x1', cx - hw * Math.cos(rad)).attr('y1', cy - hw * Math.sin(rad))
-      .attr('x2', cx + hw * Math.cos(rad)).attr('y2', cy + hw * Math.sin(rad))
-      .attr('stroke', '#3b5bdb').attr('stroke-width', 1).attr('opacity', 0.4);
+  // Reference rings (at SHAP_H * 25/50/75/100%)
+  [0.25, 0.5, 0.75, 1.0].forEach(t => {
+    svg.append('circle')
+      .attr('cx', cx).attr('cy', cy).attr('r', rPx + t * SHAP_H)
+      .attr('fill', 'none').attr('stroke', '#94a3b8')
+      .attr('stroke-width', 0.5).attr('stroke-dasharray', '3,3').attr('opacity', 0.4);
   });
+  // Outer reference ring (top of uncertainty band)
+  svg.append('circle')
+    .attr('cx', cx).attr('cy', cy)
+    .attr('r', rPx + SHAP_H + BAND_GAP + UNCERT_H)
+    .attr('fill', 'none').attr('stroke', '#d97706')
+    .attr('stroke-width', 0.5).attr('stroke-dasharray', '3,3').attr('opacity', 0.3);
 
-  sorted.forEach((d, i) => {
-    const angle = (i / sorted.length) * 2 * Math.PI - Math.PI / 2;
-    const ca = Math.cos(angle), sa = Math.sin(angle);
+  const g = svg.append('g').attr('transform', `translate(${cx},${cy})`);
 
-    const barLen  = (d.abshap  / maxAbs)    * MAX_LEN;
-    const uncLen  = (d.uncert  / maxUncert) * MAX_LEN * 0.35;
+  const slices = g.selectAll('.slice').data(sliceData, d => d.f)
+    .join('g').attr('class', 'slice').style('pointer-events', 'all').style('cursor', 'pointer');
 
-    // Start: circle edge; end: bar tip
-    const sx = cx + rPx * ca,  sy = cy + rPx * sa;
-    const ex = sx + barLen * ca, ey = sy + barLen * sa;
-    const ux = ex + uncLen * ca, uy = ey + uncLen * sa;
+  // SHAP arcs
+  slices.append('path')
+    .attr('class', 'arc-shap')
+    .attr('d', shapArc)
+    .attr('fill', d => d.color)
+    .attr('opacity', d => hoveredIdx === null ? 0.82 : (d.idx === hoveredIdx ? 0.95 : 0.25))
+    .attr('stroke', '#fff').attr('stroke-width', 0.5);
 
-    const color = getColor(d, i);
+  // Uncertainty arcs
+  slices.append('path')
+    .attr('class', 'arc-uncert')
+    .attr('d', uncertArc)
+    .attr('fill', '#f59e0b')
+    .attr('opacity', d => hoveredIdx === null ? 0.6 : (d.idx === hoveredIdx ? 0.8 : 0.15))
+    .attr('stroke', '#fff').attr('stroke-width', 0.5);
 
-    const g = svg.append('g')
-      .attr('class', 'spoke')
-      .style('cursor', 'crosshair')
-      .style('pointer-events', 'all');
+  // Labels: outside outer ring
+  slices.append('text')
+    .attr('class', 'slice-label')
+    .attr('transform', d => {
+      const r = rPx + SHAP_H + BAND_GAP + UNCERT_H + LABEL_PAD;
+      const mx = d.midAngle;
+      const x = Math.sin(mx) * r;
+      const y = -Math.cos(mx) * r;
+      const rot = (mx * 180 / Math.PI);
+      const flip = mx > Math.PI / 2 && mx < 3 * Math.PI / 2;
+      return `translate(${x},${y}) rotate(${flip ? rot + 180 : rot})`;
+    })
+    .attr('text-anchor', d => {
+      const flip = d.midAngle > Math.PI / 2 && d.midAngle < 3 * Math.PI / 2;
+      return flip ? 'end' : 'start';
+    })
+    .attr('dy', '0.35em')
+    .attr('font-size', d => hoveredIdx === d.idx ? 11 : 9)
+    .attr('font-weight', d => hoveredIdx === d.idx ? 600 : 400)
+    .attr('font-family', 'Inter, sans-serif')
+    .attr('fill', d => hoveredIdx === null ? '#475569' : (d.idx === hoveredIdx ? d.color : '#94a3b8'))
+    .style('pointer-events', 'none')
+    .text(d => SHORT[d.f] || d.f);
 
-    // Uncertainty extension (thin, faint)
-    g.append('line')
-      .attr('x1', ex).attr('y1', ey).attr('x2', ux).attr('y2', uy)
-      .attr('stroke', color).attr('stroke-width', 2.5)
-      .attr('opacity', 0.28).attr('stroke-linecap', 'round')
+  // Inline value labels inside expanded slice
+  if (hoveredIdx !== null) {
+    const d = sliceData[hoveredIdx];
+    const mx = d.midAngle;
+    const labelR = rPx + SHAP_H * 0.5;
+    const lx = Math.sin(mx) * labelR;
+    const ly = -Math.cos(mx) * labelR;
+    const rot = (mx * 180 / Math.PI);
+    const flip = mx > Math.PI / 2 && mx < 3 * Math.PI / 2;
+
+    const valG = g.append('g')
+      .attr('transform', `translate(${lx},${ly}) rotate(${flip ? rot + 180 : rot})`)
       .style('pointer-events', 'none');
 
-    // Main bar
-    g.append('line')
-      .attr('x1', sx).attr('y1', sy).attr('x2', ex).attr('y2', ey)
-      .attr('stroke', color).attr('stroke-width', BAR_W)
-      .attr('opacity', 0.82).attr('stroke-linecap', 'round')
-      .attr('class', 'spoke-bar');
+    valG.append('text')
+      .attr('text-anchor', 'middle').attr('dy', '-0.6em')
+      .attr('font-size', 10).attr('font-weight', 700)
+      .attr('font-family', 'Inter, sans-serif')
+      .attr('fill', d.wshap >= 0 ? '#dc2626' : '#2563eb')
+      .text((d.wshap >= 0 ? '+' : '') + fmt$(d.wshap));
 
-    // Tip circle
-    g.append('circle')
-      .attr('cx', ex).attr('cy', ey).attr('r', 4)
-      .attr('fill', color).attr('opacity', 0.9)
-      .style('pointer-events', 'none');
-
-    // Rotated short label at tip
-    const angleDeg = angle * 180 / Math.PI;
-    const flip     = angleDeg > 90 && angleDeg < 270;
-    const labelRot = angleDeg + (flip ? 180 : 0);
-    const anchor   = flip ? 'end' : 'start';
-    const dx       = flip ? -10 : 10;
-    g.append('text')
-      .attr('x', ex).attr('y', ey)
-      .attr('transform', `rotate(${labelRot},${ex},${ey})`)
-      .attr('text-anchor', anchor)
-      .attr('dx', dx).attr('dy', '0.35em')
+    valG.append('text')
+      .attr('text-anchor', 'middle').attr('dy', '0.8em')
       .attr('font-size', 9).attr('font-family', 'Inter, sans-serif')
-      .attr('fill', color).attr('opacity', 0.85)
-      .style('pointer-events', 'none')
-      .text(SHORT[d.f] || d.f);
+      .attr('fill', '#475569')
+      .text('|SHAP| ' + fmt$(d.abshap));
 
-    // Invisible wide hit zone for hover
-    g.append('line')
-      .attr('x1', sx).attr('y1', sy).attr('x2', ex).attr('y2', ey)
-      .attr('stroke', 'transparent').attr('stroke-width', 18)
-      .style('pointer-events', 'stroke')
-      .on('mouseenter', function(event) { onSpokeEnter(event, d, color, maxAbs, maxUncert); })
-      .on('mousemove',  function(event) { moveTooltip(event); })
-      .on('mouseleave', function()      { onSpokeLeave(g); });
-  });
+    // Uncertainty label on the outer band
+    const uR = rPx + SHAP_H + BAND_GAP + UNCERT_H * 0.5;
+    const ux = Math.sin(mx) * uR;
+    const uy = -Math.cos(mx) * uR;
+    g.append('g')
+      .attr('transform', `translate(${ux},${uy}) rotate(${flip ? rot + 180 : rot})`)
+      .style('pointer-events', 'none')
+      .append('text')
+      .attr('text-anchor', 'middle').attr('dy', '0.35em')
+      .attr('font-size', 9).attr('font-weight', 600)
+      .attr('font-family', 'Inter, sans-serif')
+      .attr('fill', '#92400e')
+      .text('±' + fmt$(d.uncert));
+  }
+
+  // Hit zones (transparent, on top)
+  slices.append('path')
+    .attr('class', 'arc-hit')
+    .attr('d', hitArc)
+    .attr('fill', 'transparent')
+    .style('pointer-events', 'all')
+    .on('mouseenter', function(event, d) { setHovered(d.idx, event); })
+    .on('mousemove',  function(event, d) { moveTooltip(event); })
+    .on('mouseleave', function() { setHovered(null); });
+
+  // Band legend (top-right inside SVG)
+  drawBandLegend(svg, cx, cy, rPx);
 }
 
-// ── hover ─────────────────────────────────────────────────
-function onSpokeEnter(event, d, color, maxAbs, maxUncert) {
-  // Highlight bar
-  d3.selectAll('.spoke-bar').attr('opacity', 0.2).attr('stroke-width', BAR_W);
-  event.currentTarget.parentNode.querySelector('.spoke-bar').setAttribute('opacity', 1);
-  event.currentTarget.parentNode.querySelector('.spoke-bar').setAttribute('stroke-width', BAR_W_HOV);
+// ── hover ──────────────────────────────────────────────────
+function setHovered(idx, event) {
+  hoveredIdx = idx;
+  redrawRadial();
+  if (idx !== null) {
+    showTooltip(sortedFeatures[idx], event);
+  } else {
+    document.getElementById('radial-tooltip').classList.add('hidden');
+  }
+}
 
-  // Build tooltip
-  const signed  = d.wshap;
-  const mag     = d.abshap;
-  const barPct  = (mag / maxAbs) * 100;
-  const uncPct  = (d.uncert / maxUncert) * 100;
-  const signStr = (signed >= 0 ? '+' : '') + fmt$(signed);
-  const dir     = signed >= 0 ? '#dc2626' : '#2563eb';
+function showTooltip(d, event) {
+  const maxAbs    = d3.max(sortedFeatures, x => x.abshap) || 1;
+  const maxUncert = d3.max(sortedFeatures, x => x.uncert) || 1;
+  const barPct    = (d.abshap / maxAbs) * 100;
+  const uncPct    = (d.uncert / maxUncert) * 100;
+  const dir       = d.wshap >= 0 ? '#dc2626' : '#2563eb';
+  const signStr   = (d.wshap >= 0 ? '+' : '') + fmt$(d.wshap);
 
   document.getElementById('radial-tooltip').innerHTML = `
     <div class="tt-name">${featureLabels[d.f]}</div>
-    <div class="tt-row">
-      <span>Weighted SHAP</span>
-      <span class="tt-val" style="color:${dir}">${signStr}</span>
-    </div>
-    <div class="tt-row">
-      <span>Mean |SHAP|</span>
-      <span class="tt-val">${fmt$(mag)}</span>
-    </div>
+    <div class="tt-row"><span>Weighted SHAP</span><span class="tt-val" style="color:${dir}">${signStr}</span></div>
+    <div class="tt-row"><span>Mean |SHAP|</span><span class="tt-val">${fmt$(d.abshap)}</span></div>
     <div class="tt-bar-wrap">
       <div class="tt-bar-label">Mean |SHAP| (relative)</div>
-      <div class="tt-bar-track">
-        <div class="tt-bar-fill" style="width:${barPct.toFixed(1)}%;background:${color}"></div>
-      </div>
+      <div class="tt-bar-track"><div class="tt-bar-fill" style="width:${barPct.toFixed(1)}%;background:${getColor(d, sortedFeatures.indexOf(d))}"></div></div>
     </div>
     <div class="tt-bar-wrap">
       <div class="tt-bar-label">Geo-uncertainty ±${fmt$(d.uncert)}</div>
-      <div class="tt-uncert-track">
-        <div class="tt-bar-fill" style="width:${uncPct.toFixed(1)}%;background:#d97706"></div>
-      </div>
+      <div class="tt-uncert-track"><div class="tt-bar-fill" style="width:${uncPct.toFixed(1)}%;background:#d97706"></div></div>
     </div>
-    <div class="tt-footer">
-      ${currentAgg.n} tracts · ${(radiusM/1000).toFixed(1)} km radius · Gaussian weighted
-    </div>`;
+    <div class="tt-footer">${currentAgg.n} tracts · ${(radiusM/1000).toFixed(1)} km · Gaussian weighted</div>`;
 
   document.getElementById('radial-tooltip').classList.remove('hidden');
-  moveTooltip(event);
-}
-
-function onSpokeLeave(g) {
-  d3.selectAll('.spoke-bar').attr('opacity', 0.82).attr('stroke-width', BAR_W);
-  document.getElementById('radial-tooltip').classList.add('hidden');
+  if (event) moveTooltip(event);
 }
 
 function moveTooltip(event) {
   const tip = document.getElementById('radial-tooltip');
   const tw = tip.offsetWidth, th = tip.offsetHeight;
-  let x = event.clientX + 14, y = event.clientY - 14;
-  if (x + tw > window.innerWidth  - 10) x = event.clientX - tw - 14;
+  let x = event.clientX + 16, y = event.clientY - 14;
+  if (x + tw > window.innerWidth  - 10) x = event.clientX - tw - 16;
   if (y + th > window.innerHeight - 10) y = event.clientY - th + 14;
   tip.style.left = x + 'px';
   tip.style.top  = y + 'px';
 }
 
-// ── color helpers ─────────────────────────────────────────
+// ── band legend ────────────────────────────────────────────
+function drawBandLegend(svg, cx, cy, rPx) {
+  const lx = 16, ly = 16;
+  const lg = svg.append('g').attr('transform', `translate(${lx},${ly})`);
+  const items = [
+    { color: '#6366f1', label: 'Mean |SHAP|' },
+    { color: '#f59e0b', label: 'Geo-uncertainty' }
+  ];
+  items.forEach((it, i) => {
+    lg.append('rect').attr('x', 0).attr('y', i * 16).attr('width', 10).attr('height', 10)
+      .attr('rx', 2).attr('fill', it.color).attr('opacity', 0.75);
+    lg.append('text').attr('x', 14).attr('y', i * 16 + 9)
+      .attr('font-size', 9.5).attr('font-family', 'Inter,sans-serif').attr('fill', '#475569')
+      .text(it.label);
+  });
+}
+
+// ── color ─────────────────────────────────────────────────
 function getColor(d, i) {
-  if (colorMode === 'signed') return d.wshap >= 0 ? '#dc2626' : '#2563eb';
+  if (colorMode === 'signed') {
+    return d.wshap >= 0 ? '#dc2626' : '#2563eb';
+  }
   return PALETTE[i % PALETTE.length];
 }
 
@@ -494,10 +608,10 @@ function setColorMode(mode) {
   colorMode = mode;
   document.getElementById('btn-signed').classList.toggle('active',  mode === 'signed');
   document.getElementById('btn-feature').classList.toggle('active', mode === 'feature');
-  if (circleLayer) redrawSpokes();
+  if (circleLayer) redrawRadial();
 }
 
-// ── legend ────────────────────────────────────────────────
+// ── legend ─────────────────────────────────────────────────
 function buildLegend(scale, min, max) {
   const stops = d3.range(0, 1.01, 0.1).map(t => scale(min + t*(max-min))).join(',');
   document.getElementById('legend-grad').style.background = `linear-gradient(to right,${stops})`;
@@ -505,7 +619,7 @@ function buildLegend(scale, min, max) {
   document.getElementById('leg-max').textContent = fmt$(max);
 }
 
-// ── utils ─────────────────────────────────────────────────
+// ── utils ──────────────────────────────────────────────────
 function fmt$(v) {
   const a = Math.abs(v);
   if (a >= 1000) return (v < 0 ? '-' : '') + '$' + (a/1000).toFixed(0) + 'k';
@@ -516,7 +630,7 @@ function updateGrad(el) {
   el.style.setProperty('--pct', p + '%');
 }
 
-// ── boot ──────────────────────────────────────────────────
+// ── boot ───────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', init);
 </script>
 </body>
