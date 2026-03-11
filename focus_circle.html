@@ -150,19 +150,28 @@
 
     .bar-row {
       display: grid;
-      grid-template-columns: 130px 1fr 46px;
+      grid-template-columns: 110px 1fr 50px;
       align-items: center;
-      padding: 2px 14px;
+      padding: 3px 14px 2px;
       gap: 6px;
-      min-height: 22px;
+      min-height: 30px;
     }
     .bar-row:hover { background: #f8fafc; }
 
     .bar-label { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+    .bar-tracks { display: flex; flex-direction: column; gap: 3px; }
+
     .bar-track {
       position: relative;
-      height: 12px;
+      height: 9px;
+      background: var(--bg);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .bar-track-uncert {
+      position: relative;
+      height: 5px;
       background: var(--bg);
       border-radius: 3px;
       overflow: hidden;
@@ -183,16 +192,9 @@
       transition: width .25s, left .25s;
     }
 
-    /* uncertainty extension (lighter) */
-    .bar-uncert {
-      position: absolute;
-      top: 2px; bottom: 2px;
-      border-radius: 2px;
-      opacity: 0.35;
-      transition: width .25s, left .25s;
-    }
-
-    .bar-val { font-size: 10px; font-weight: 600; color: var(--text); text-align: right; }
+    .bar-vals { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+    .bar-val  { font-size: 10px; font-weight: 600; color: var(--text); }
+    .bar-val-u { font-size: 9px; font-weight: 500; color: #b45309; }
 
     .fp-empty { padding: 20px 14px; text-align: center; font-size: 12px; color: var(--light); }
 
@@ -279,7 +281,7 @@
     <div class="fp-legend">
       <span><span class="fp-legend-dot" style="background:#dc2626"></span>Positive SHAP</span>
       <span><span class="fp-legend-dot" style="background:#2563eb"></span>Negative SHAP</span>
-      <span><span class="fp-legend-dot" style="background:#d97706;opacity:.5"></span>Uncertainty</span>
+      <span><span class="fp-legend-dot" style="background:#d97706"></span>Geo-uncertainty</span>
     </div>
     <div class="fp-body" id="fp-body">
       <div class="fp-empty">Place circle on the map</div>
@@ -524,32 +526,26 @@ function updatePanel() {
     .sort((a, b) => b.abshap - a.abshap);
 
   const primaryVals = sorted.map(d => showMode === 'wshap' ? d.wshap : d.abshap);
-  const maxAbs = d3.max(primaryVals.map(Math.abs)) || 1;
+  const maxAbs   = d3.max(primaryVals.map(Math.abs)) || 1;
+  const maxUncert = d3.max(sorted.map(d => d.uncert)) || 1;
 
   const rows = sorted.map(d => {
-    const val    = showMode === 'wshap' ? d.wshap : d.abshap;
-    const isPos  = val >= 0;
-    const barW   = Math.abs(val) / maxAbs;  // [0,1]
-    const uncW   = d.uncert / maxAbs;
+    const val   = showMode === 'wshap' ? d.wshap : d.abshap;
+    const isPos = val >= 0;
+    const barW  = Math.abs(val) / maxAbs;
 
-    // In signed mode: bar goes left or right of center
-    // In magnitude mode: bar always goes right from 0
-    const TRACK  = 100; // % track width
-    const CENTER = showMode === 'wshap' ? 50 : 0;  // % position of zero
-
-    let barLeft, barPct, uncLeft, uncPct;
+    // SHAP bar
+    let barLeft, barPct;
     if (showMode === 'wshap') {
       barPct  = barW * 50;
-      barLeft = isPos ? CENTER : CENTER - barPct;
-      // uncertainty shown as extensions on both sides of bar
-      uncPct  = uncW * 50;
-      uncLeft = barLeft - uncPct;
+      barLeft = isPos ? 50 : 50 - barPct;
     } else {
       barPct  = barW * 100;
       barLeft = 0;
-      uncPct  = Math.min(uncW * 100, 100 - barPct);
-      uncLeft = barPct;
     }
+
+    // Uncertainty bar — independent scale, always left→right
+    const uncPct = (d.uncert / maxUncert) * 100;
 
     const color   = showMode === 'wshap' ? (isPos ? '#dc2626' : '#2563eb') : '#6366f1';
     const valText = (val >= 0 ? '+' : '') + fmt$(val);
@@ -557,16 +553,23 @@ function updatePanel() {
     return `
       <div class="bar-row">
         <span class="bar-label" title="${featureLabels[d.f]}">${featureLabels[d.f]}</span>
-        <div class="bar-track">
-          ${showMode === 'wshap' ? `<div class="bar-center" style="left:50%"></div>` : ''}
-          <div class="bar-uncert"
-               style="background:#d97706;left:${uncLeft.toFixed(1)}%;width:${(uncPct + barPct).toFixed(1)}%">
+        <div class="bar-tracks">
+          <div class="bar-track">
+            ${showMode === 'wshap' ? `<div class="bar-center" style="left:50%"></div>` : ''}
+            <div class="bar-fill"
+                 style="background:${color};left:${barLeft.toFixed(1)}%;width:${barPct.toFixed(1)}%">
+            </div>
           </div>
-          <div class="bar-fill"
-               style="background:${color};left:${barLeft.toFixed(1)}%;width:${barPct.toFixed(1)}%">
+          <div class="bar-track-uncert">
+            <div class="bar-fill"
+                 style="background:#d97706;left:0;width:${uncPct.toFixed(1)}%">
+            </div>
           </div>
         </div>
-        <span class="bar-val">${valText}</span>
+        <div class="bar-vals">
+          <span class="bar-val">${valText}</span>
+          <span class="bar-val-u">±${fmt$(d.uncert)}</span>
+        </div>
       </div>`;
   }).join('');
 
