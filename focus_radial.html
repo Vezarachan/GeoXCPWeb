@@ -612,12 +612,6 @@ function updateRadialLegend() {
   html += `<div class="rl-section">
     <div class="rl-section-title">Left arc — Mean |SHAP|</div>`;
   html += `<div class="rl-row" style="font-size:10.5px;color:var(--muted)">Arc length = feature importance</div>`;
-  const limit = Math.min(sortedFeatures.length, 6);
-  for (let i = 0; i < limit; i++) {
-    const d = sortedFeatures[i];
-    html += `<div class="rl-row"><span class="rl-swatch" style="background:${getColor(i)}"></span>${SHORT[d.f] || d.f}</div>`;
-  }
-  if (sortedFeatures.length > 6) html += `<div class="rl-row" style="color:var(--light);font-size:10px">…${sortedFeatures.length - 6} more features</div>`;
   html += `</div>`;
 
   // Section 2: Uncertainty arc (right half)
