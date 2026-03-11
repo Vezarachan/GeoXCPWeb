@@ -158,17 +158,11 @@
 // ── constants ─────────────────────────────────────────────
 const EXCLUDE    = new Set(['lon', 'lat']);
 const DEG_PER_M  = 1 / 111000;
-const MAX_SPOKES = 12;
+const MAX_SPOKES = 19;   // show all NYC features (up to 19)
 
-// Bar heights (px) — both bands share the same radial height range
-const MAX_H     = 90;   // max bar height for SHAP and uncertainty
-const LABEL_PAD = 12;   // padding after bars before label
-const SUB_GAP   = 0.006; // angular gap between SHAP bar and uncertainty bar within a slice
-
-// Angular gap between slices (radians)
-const SLICE_GAP = 0.018;
-// Expansion factor for hovered slice
-const EXPAND_FACTOR = 4.0;
+// Bar geometry (px)
+const BAR_GAP    = 3;    // gap between SHAP and uncertainty sub-bars
+const LABEL_PAD  = 9;    // gap from bar tip outer edge to feature label
 
 const PALETTE = [
   '#e63946','#2a9d8f','#e9c46a','#f4a261','#264653',
@@ -330,35 +324,6 @@ function circleScreenGeom() {
   return { cx: cPx.x, cy: cPx.y, rPx: Math.hypot(ePx.x - cPx.x, ePx.y - cPx.y) };
 }
 
-// ── angle layout ───────────────────────────────────────────
-// Returns array of {startAngle, endAngle, midAngle} for each feature
-function computeAngles(N, expandedIdx) {
-  const totalGap = N * SLICE_GAP;
-  const available = 2 * Math.PI - totalGap;
-
-  let baseAng, expandAng, compressAng;
-  if (expandedIdx === null || N <= 1) {
-    baseAng = available / N;
-    expandAng = baseAng;
-    compressAng = baseAng;
-  } else {
-    baseAng     = available / N;
-    expandAng   = Math.min(baseAng * EXPAND_FACTOR, available * 0.45);
-    compressAng = (available - expandAng) / (N - 1);
-  }
-
-  const angles = [];
-  let cur = -Math.PI / 2; // start at top
-  for (let i = 0; i < N; i++) {
-    const w = (expandedIdx !== null && i === expandedIdx) ? expandAng : compressAng;
-    const start = cur + SLICE_GAP / 2;
-    const end   = cur + w + SLICE_GAP / 2;
-    angles.push({ startAngle: start, endAngle: end, midAngle: (start + end) / 2 });
-    cur += w + SLICE_GAP;
-  }
-  return angles;
-}
-
 // ── main draw ──────────────────────────────────────────────
 function redrawRadial() {
   const svg = d3.select('#radial-svg');
@@ -369,152 +334,124 @@ function redrawRadial() {
 
   const { cx, cy, rPx } = circleScreenGeom();
   const N = sortedFeatures.length;
-  const angles = computeAngles(N, hoveredIdx);
+
+  // Dynamic sizing based on circle pixel radius and feature count
+  const MAX_H  = Math.min(100, Math.max(40, rPx * 1.5));
+  const bwBase = Math.min(14, Math.max(5, Math.floor(rPx * 2 * Math.PI / N * 0.22)));
+  const bwHov  = Math.min(28, Math.floor(bwBase * 2.5));
 
   const maxAbs    = d3.max(sortedFeatures, d => d.abshap) || 1;
   const maxUncert = d3.max(sortedFeatures, d => d.uncert) || 1;
 
-  // ── sub-arc split: each slice → left=SHAP, right=uncertainty ──
-  // SHAP sub-arc:   [startAngle,          midAngle - SUB_GAP/2]
-  // Uncert sub-arc: [midAngle + SUB_GAP/2, endAngle            ]
-  const shapArc = d3.arc()
-    .innerRadius(rPx)
-    .outerRadius(d => rPx + (d.abshap / maxAbs) * MAX_H)
-    .startAngle(d => d.startAngle)
-    .endAngle(d => d.midAngle - SUB_GAP / 2)
-    .cornerRadius(2);
-
-  const uncertArc = d3.arc()
-    .innerRadius(rPx)
-    .outerRadius(d => rPx + (d.uncert / maxUncert) * MAX_H)
-    .startAngle(d => d.midAngle + SUB_GAP / 2)
-    .endAngle(d => d.endAngle)
-    .cornerRadius(2);
-
-  // Hit zone covers full slice
-  const hitArc = d3.arc()
-    .innerRadius(rPx)
-    .outerRadius(rPx + MAX_H + LABEL_PAD)
-    .startAngle(d => d.startAngle)
-    .endAngle(d => d.endAngle);
-
-  // ── build data with angles ──
-  const sliceData = sortedFeatures.map((d, i) => ({
-    ...d, ...angles[i], idx: i,
-    color: getColor(d, i)
-  }));
-
-  // ── draw ──
   svg.selectAll('*').remove();
 
-  // Base circle
-  svg.append('circle')
-    .attr('cx', cx).attr('cy', cy).attr('r', rPx)
-    .attr('fill', 'none').attr('stroke', '#3b5bdb')
-    .attr('stroke-width', 1.5).attr('opacity', 0.5);
-
-  // Reference rings at 25/50/75/100% of MAX_H
-  [0.25, 0.5, 0.75, 1.0].forEach(t => {
+  // Reference rings at 33/67/100% of MAX_H
+  [0.33, 0.67, 1.0].forEach(t => {
     svg.append('circle')
       .attr('cx', cx).attr('cy', cy).attr('r', rPx + t * MAX_H)
       .attr('fill', 'none').attr('stroke', '#94a3b8')
-      .attr('stroke-width', 0.5).attr('stroke-dasharray', '3,3').attr('opacity', 0.35);
+      .attr('stroke-width', 0.5).attr('stroke-dasharray', '3,3').attr('opacity', 0.3);
   });
 
-  const g = svg.append('g').attr('transform', `translate(${cx},${cy})`);
+  // Focus circle ring
+  svg.append('circle')
+    .attr('cx', cx).attr('cy', cy).attr('r', rPx)
+    .attr('fill', 'none').attr('stroke', '#3b5bdb')
+    .attr('stroke-width', 2).attr('opacity', 0.6);
 
-  const slices = g.selectAll('.slice').data(sliceData, d => d.f)
-    .join('g').attr('class', 'slice').style('pointer-events', 'all').style('cursor', 'pointer');
+  // One spoke per feature — rotated group, rect bars in local coords
+  sortedFeatures.forEach((d, i) => {
+    const theta   = (i / N) * 360;         // CW degrees from top (0=bar points up)
+    const isLower = theta > 90 && theta < 270;  // bottom half → flip text
+    const isHov   = hoveredIdx === i;
+    const bw      = isHov ? bwHov : bwBase;
+    const shapH   = Math.max(2, (d.abshap / maxAbs) * MAX_H);
+    const uncH    = Math.max(2, (d.uncert / maxUncert) * MAX_H);
+    const color   = getColor(d, i);
+    const alpha   = hoveredIdx === null ? 0.85 : (isHov ? 0.95 : 0.2);
 
-  // Left sub-arc: mean|SHAP| (feature color / signed color)
-  slices.append('path')
-    .attr('class', 'arc-shap')
-    .attr('d', shapArc)
-    .attr('fill', d => d.color)
-    .attr('opacity', d => hoveredIdx === null ? 0.82 : (d.idx === hoveredIdx ? 0.95 : 0.22))
-    .attr('stroke', '#fff').attr('stroke-width', 0.5);
+    // Local coord system: +y = toward center, -y = outward (bar direction)
+    const spk = svg.append('g')
+      .attr('transform', `translate(${cx},${cy}) rotate(${theta})`);
 
-  // Right sub-arc: geo-uncertainty (amber)
-  slices.append('path')
-    .attr('class', 'arc-uncert')
-    .attr('d', uncertArc)
-    .attr('fill', '#f59e0b')
-    .attr('opacity', d => hoveredIdx === null ? 0.65 : (d.idx === hoveredIdx ? 0.85 : 0.18))
-    .attr('stroke', '#fff').attr('stroke-width', 0.5);
-
-  // Labels outside
-  slices.append('text')
-    .attr('class', 'slice-label')
-    .attr('transform', d => {
-      const r = rPx + MAX_H + LABEL_PAD;
-      const mx = d.midAngle;
-      const x = Math.sin(mx) * r, y = -Math.cos(mx) * r;
-      const rot = mx * 180 / Math.PI;
-      const flip = mx > Math.PI / 2 && mx < 3 * Math.PI / 2;
-      return `translate(${x},${y}) rotate(${flip ? rot + 180 : rot})`;
-    })
-    .attr('text-anchor', d => (d.midAngle > Math.PI / 2 && d.midAngle < 3 * Math.PI / 2) ? 'end' : 'start')
-    .attr('dy', '0.35em')
-    .attr('font-size', d => hoveredIdx === d.idx ? 11 : 9)
-    .attr('font-weight', d => hoveredIdx === d.idx ? 600 : 400)
-    .attr('font-family', 'Inter, sans-serif')
-    .attr('fill', d => hoveredIdx === null ? '#475569' : (d.idx === hoveredIdx ? d.color : '#94a3b8'))
-    .style('pointer-events', 'none')
-    .text(d => SHORT[d.f] || d.f);
-
-  // Inline labels inside expanded slice
-  if (hoveredIdx !== null) {
-    const d = sliceData[hoveredIdx];
-    const flip = d.midAngle > Math.PI / 2 && d.midAngle < 3 * Math.PI / 2;
-    const rot  = d.midAngle * 180 / Math.PI;
-    const rotFn = (r, angle) => {
-      const x = Math.sin(angle) * r, y = -Math.cos(angle) * r;
-      return `translate(${x},${y}) rotate(${flip ? rot + 180 : rot})`;
-    };
-
-    // SHAP label — centered in left sub-arc at mid-height
-    const shapMid = (d.startAngle + d.midAngle - SUB_GAP / 2) / 2;
-    const shapR   = rPx + (d.abshap / maxAbs) * MAX_H * 0.55;
-    const shapLx  = Math.sin(shapMid) * shapR, shapLy = -Math.cos(shapMid) * shapR;
-    const shapRot = shapMid * 180 / Math.PI;
-    const shapFlip = shapMid > Math.PI / 2 && shapMid < 3 * Math.PI / 2;
-
-    const sg = g.append('g')
-      .attr('transform', `translate(${shapLx},${shapLy}) rotate(${shapFlip ? shapRot + 180 : shapRot})`)
+    // SHAP rect (left sub-bar): x ∈ [-(bw+GAP/2), -GAP/2], y from -rPx upward
+    spk.append('rect')
+      .attr('x', -(bw + BAR_GAP / 2))
+      .attr('y', -(rPx + shapH))
+      .attr('width', bw).attr('height', shapH)
+      .attr('fill', color).attr('opacity', alpha).attr('rx', 2)
       .style('pointer-events', 'none');
-    sg.append('text').attr('text-anchor', 'middle').attr('dy', '-0.55em')
-      .attr('font-size', 10).attr('font-weight', 700).attr('font-family', 'Inter, sans-serif')
-      .attr('fill', d.wshap >= 0 ? '#dc2626' : '#2563eb')
-      .text((d.wshap >= 0 ? '+' : '') + fmt$(d.wshap));
-    sg.append('text').attr('text-anchor', 'middle').attr('dy', '0.75em')
-      .attr('font-size', 9).attr('font-family', 'Inter, sans-serif').attr('fill', '#475569')
-      .text(fmt$(d.abshap));
 
-    // Uncertainty label — centered in right sub-arc at mid-height
-    const uncMid = (d.midAngle + SUB_GAP / 2 + d.endAngle) / 2;
-    const uncR   = rPx + (d.uncert / maxUncert) * MAX_H * 0.55;
-    const uncLx  = Math.sin(uncMid) * uncR, uncLy = -Math.cos(uncMid) * uncR;
-    const uncRot = uncMid * 180 / Math.PI;
-    const uncFlip = uncMid > Math.PI / 2 && uncMid < 3 * Math.PI / 2;
+    // Uncertainty rect (right sub-bar, amber): x ∈ [GAP/2, bw+GAP/2]
+    spk.append('rect')
+      .attr('x', BAR_GAP / 2)
+      .attr('y', -(rPx + uncH))
+      .attr('width', bw).attr('height', uncH)
+      .attr('fill', '#f59e0b')
+      .attr('opacity', hoveredIdx === null ? 0.65 : (isHov ? 0.85 : 0.15))
+      .attr('rx', 2)
+      .style('pointer-events', 'none');
 
-    g.append('g')
-      .attr('transform', `translate(${uncLx},${uncLy}) rotate(${uncFlip ? uncRot + 180 : uncRot})`)
+    // Feature label at bar tip outer edge
+    const labelY = -(rPx + MAX_H + LABEL_PAD);
+    const lbl = spk.append('text')
+      .attr('x', 0).attr('y', labelY)
+      .attr('text-anchor', 'middle').attr('dy', '0.35em')
+      .attr('font-size', isHov ? 11 : 9)
+      .attr('font-weight', isHov ? 600 : 400)
+      .attr('font-family', 'Inter, sans-serif')
+      .attr('fill', hoveredIdx === null ? '#475569' : (isHov ? color : '#94a3b8'))
       .style('pointer-events', 'none')
-      .append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
-      .attr('font-size', 9).attr('font-weight', 600).attr('font-family', 'Inter, sans-serif')
-      .attr('fill', '#92400e')
-      .text('±' + fmt$(d.uncert));
-  }
+      .text(SHORT[d.f] || d.f);
 
-  // Hit zones
-  slices.append('path')
-    .attr('class', 'arc-hit')
-    .attr('d', hitArc)
-    .attr('fill', 'transparent')
-    .style('pointer-events', 'all')
-    .on('mouseenter', function(event, d) { setHovered(d.idx, event); })
-    .on('mousemove',  function(event, d) { moveTooltip(event); })
-    .on('mouseleave', function() { setHovered(null); });
+    // Flip bottom-half labels so they read from outside the circle
+    if (isLower) {
+      lbl.attr('transform', `rotate(180, 0, ${labelY})`);
+    }
+
+    // Inline value labels inside bars (hover only, if bars are tall enough)
+    if (isHov) {
+      // SHAP value inside SHAP bar at vertical midpoint
+      if (shapH > 16) {
+        const sy = -(rPx + shapH / 2);
+        const sv = spk.append('text')
+          .attr('x', -(bw / 2 + BAR_GAP / 2)).attr('y', sy)
+          .attr('text-anchor', 'middle').attr('dy', '0.35em')
+          .attr('font-size', 9).attr('font-weight', 700)
+          .attr('font-family', 'Inter, sans-serif').attr('fill', '#fff')
+          .style('pointer-events', 'none')
+          .text((d.wshap >= 0 ? '+' : '') + fmt$(d.wshap));
+        if (isLower) sv.attr('transform', `rotate(180, ${-(bw / 2 + BAR_GAP / 2)}, ${sy})`);
+      }
+
+      // Uncertainty value inside uncertainty bar at vertical midpoint
+      if (uncH > 16) {
+        const uy = -(rPx + uncH / 2);
+        const uv = spk.append('text')
+          .attr('x', bw / 2 + BAR_GAP / 2).attr('y', uy)
+          .attr('text-anchor', 'middle').attr('dy', '0.35em')
+          .attr('font-size', 9).attr('font-weight', 600)
+          .attr('font-family', 'Inter, sans-serif').attr('fill', '#78350f')
+          .style('pointer-events', 'none')
+          .text('±' + fmt$(d.uncert));
+        if (isLower) uv.attr('transform', `rotate(180, ${bw / 2 + BAR_GAP / 2}, ${uy})`);
+      }
+    }
+
+    // Transparent hit zone covering full spoke height + label area
+    const hitW = bwBase * 2 + BAR_GAP + 8;
+    spk.append('rect')
+      .attr('x', -hitW / 2)
+      .attr('y', -(rPx + MAX_H + LABEL_PAD + 14))
+      .attr('width', hitW)
+      .attr('height', MAX_H + LABEL_PAD + 14)
+      .attr('fill', 'transparent')
+      .style('pointer-events', 'all')
+      .style('cursor', 'pointer')
+      .on('mouseenter', (event) => setHovered(i, event))
+      .on('mousemove',  (event) => moveTooltip(event))
+      .on('mouseleave', () => setHovered(null));
+  });
 
   drawBandLegend(svg, cx, cy, rPx);
 }
