@@ -178,6 +178,8 @@ const DATASETS = [
   {
     label:      'NYC Median Income',
     url:        'data/results_nyc.json',
+    scriptUrl:  'data/results_nyc.js',
+    varName:    'GeoXCPDataNYC',
     yField:     'income',
     yLabel:     'Median Income',
     yUnit:      '$',
@@ -188,6 +190,8 @@ const DATASETS = [
   {
     label:      'Seattle House Price',
     url:        'data/results.json',
+    scriptUrl:  'data/results.js',
+    varName:    'GeoXCPData',
     yField:     'price',
     yLabel:     'House Price',
     yUnit:      '$',
@@ -198,6 +202,8 @@ const DATASETS = [
   {
     label:      'US Politics Voting',
     url:        'data/results_politics.json',
+    scriptUrl:  'data/results_politics.js',
+    varName:    'GeoXCPDataPolitics',
     yField:     'y_val',
     yLabel:     'Dem. Vote %',
     yUnit:      '%',
@@ -237,8 +243,7 @@ let hoveredIdx = null;
 let sortedFeatures = [];
 
 // ── dataset loading ────────────────────────────────────────
-async function loadDataset(ds) {
-  // Reset radial state
+function resetRadialState() {
   currentAgg = null; hoveredIdx = null; sortedFeatures = [];
   if (circleLayer) { circleLayer.remove(); circleLayer = null; }
   centerLatLng = null;
@@ -248,21 +253,43 @@ async function loadDataset(ds) {
   document.getElementById('map-legend').style.display    = 'none';
   document.getElementById('controls').style.display      = 'none';
   document.getElementById('radial-legend').style.display = 'none';
+}
 
-  let json;
-  try {
-    const resp = await fetch(ds.url);
-    if (!resp.ok) throw new Error(resp.statusText);
-    json = await resp.json();
-  } catch(e) {
-    const nd = document.getElementById('no-data');
-    nd.querySelector('h2').textContent = 'Failed to load data';
-    nd.querySelector('p').textContent  = `Could not fetch ${ds.url}: ${e.message}`;
-    nd.style.display = 'flex';
+function loadDataset(ds) {
+  resetRadialState();
+  // Try fetch (HTTP server), fall back to <script> tag (file:// protocol)
+  fetch(ds.url)
+    .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); })
+    .then(json => { document.getElementById('no-data').style.display = 'none'; setupData(json, ds); })
+    .catch(() => loadViaScript(ds));
+}
+
+function loadViaScript(ds) {
+  // Already loaded (e.g., switching back to same dataset)?
+  if (window[ds.varName]) {
+    document.getElementById('no-data').style.display = 'none';
+    setupData(window[ds.varName], ds);
     return;
   }
-  document.getElementById('no-data').style.display = 'none';
-  setupData(json, ds);
+  const s = document.createElement('script');
+  s.src = ds.scriptUrl;
+  s.onload = () => {
+    if (window[ds.varName]) {
+      document.getElementById('no-data').style.display = 'none';
+      setupData(window[ds.varName], ds);
+    } else {
+      showLoadError(ds);
+    }
+  };
+  s.onerror = () => showLoadError(ds);
+  document.head.appendChild(s);
+}
+
+function showLoadError(ds) {
+  const nd = document.getElementById('no-data');
+  nd.querySelector('h2').textContent = 'Failed to load data';
+  nd.querySelector('p').textContent  = `Could not load ${ds.label}. Run the data generation script and serve via HTTP.`;
+  nd.style.display = 'flex';
 }
 
 function setupData(json, ds) {

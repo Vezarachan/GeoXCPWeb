@@ -987,9 +987,9 @@
 
 // ── Dataset registry ───────────────────────────────────────
 const DATASETS = [
-  { label: 'Seattle House Price', url: 'data/results.json',          yField: 'price',  yLabel: 'House Price',   yUnit: '$',  pointLabel: 'houses' },
-  { label: 'NYC Median Income',   url: 'data/results_nyc.json',      yField: 'income', yLabel: 'Median Income', yUnit: '$',  pointLabel: 'tracts' },
-  { label: 'US Politics Voting',  url: 'data/results_politics.json', yField: 'y_val',  yLabel: 'Dem. Vote %',   yUnit: '%',  pointLabel: 'counties' },
+  { label: 'Seattle House Price', url: 'data/results.json',          scriptUrl: 'data/results.js',          varName: 'GeoXCPData',          yField: 'price',  yLabel: 'House Price',   yUnit: '$',  pointLabel: 'houses' },
+  { label: 'NYC Median Income',   url: 'data/results_nyc.json',      scriptUrl: 'data/results_nyc.js',      varName: 'GeoXCPDataNYC',       yField: 'income', yLabel: 'Median Income', yUnit: '$',  pointLabel: 'tracts' },
+  { label: 'US Politics Voting',  url: 'data/results_politics.json', scriptUrl: 'data/results_politics.js', varName: 'GeoXCPDataPolitics',  yField: 'y_val',  yLabel: 'Dem. Vote %',   yUnit: '%',  pointLabel: 'counties' },
 ];
 
 const App = (() => {
@@ -1020,17 +1020,30 @@ const App = (() => {
   ];
 
   // ── Dataset loading ────────────────────────────────────
-  async function loadDataset(ds) {
-    let json;
-    try {
-      const resp = await fetch(ds.url);
-      if (!resp.ok) throw new Error(resp.statusText);
-      json = await resp.json();
-    } catch(e) {
-      console.error('Failed to load dataset:', e);
-      return;
+  function loadDataset(ds) {
+    // Try fetch (HTTP server), fall back to <script> tag (file:// protocol)
+    fetch(ds.url)
+      .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); })
+      .then(json => setupData(json, ds))
+      .catch(() => loadViaScript(ds));
+  }
+
+  function loadViaScript(ds) {
+    if (window[ds.varName]) { setupData(window[ds.varName], ds); return; }
+    const s = document.createElement('script');
+    s.src = ds.scriptUrl;
+    s.onload = () => window[ds.varName] ? setupData(window[ds.varName], ds) : showLoadError(ds);
+    s.onerror = () => showLoadError(ds);
+    document.head.appendChild(s);
+  }
+
+  function showLoadError(ds) {
+    const el = document.getElementById('no-data-overlay');
+    if (el) {
+      el.style.display = 'flex';
+      const msg = el.querySelector('p');
+      if (msg) msg.textContent = `Could not load ${ds.label}. Run the data generation script and serve via HTTP.`;
     }
-    setupData(json, ds);
   }
 
   function setupData(json, ds) {
