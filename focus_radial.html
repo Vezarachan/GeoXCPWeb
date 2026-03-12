@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NYC Income SHAP | Radial Focus Explorer</title>
+  <title>GeoXCP Radial Focus Explorer</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>
@@ -21,6 +21,8 @@
     .header-sub   { font-size: 12px; color: var(--muted); }
     .header-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
     .chip { background: var(--bg); border: 1px solid var(--border); border-radius: 20px; padding: 3px 10px; font-size: 11px; color: var(--muted); font-weight: 500; }
+    .ds-select { font-size: 12px; font-weight: 500; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; cursor: pointer; outline: none; }
+    .ds-select:focus { border-color: var(--primary); }
 
     /* ── MAP ── */
     #map { flex: 1; position: relative; cursor: crosshair; }
@@ -113,22 +115,26 @@
 
 <header class="header">
   <span class="logo-badge">GeoXCP</span>
+  <select class="ds-select" id="dataset-sel">
+    <option value="0">NYC Median Income</option>
+    <option value="1">Seattle House Price</option>
+    <option value="2">US Politics Voting</option>
+  </select>
   <div>
-    <div class="header-title">NYC Median Income — Radial Focus Explorer</div>
+    <div class="header-title" id="header-title">Radial Focus Explorer</div>
     <div class="header-sub">Click map to place Focus Circle · Drag to move · Hover bars for details</div>
   </div>
   <div class="header-right">
-    <span class="chip" id="chip-n">— tracts</span>
+    <span class="chip" id="chip-n">— points</span>
     <span class="chip" id="chip-r">— radius</span>
   </div>
 </header>
 
 <div id="map">
   <!-- no-data -->
-  <div id="no-data">
-    <h2>Data not found</h2>
-    <p>Run the data generation script first, then serve this file:</p>
-    <code>/opt/anaconda3/envs/UncertaintyGeoXAI/bin/python generate_data_nyc.py</code>
+  <div id="no-data" style="display:none">
+    <h2>Loading data…</h2>
+    <p>Fetching dataset from server. Make sure you're running a local server:</p>
     <code>python3 -m http.server 8765</code>
   </div>
 
@@ -141,9 +147,9 @@
   <!-- Map hint -->
   <div class="map-hint" id="map-hint">Click anywhere on the map to place a Focus Circle</div>
 
-  <!-- Income legend -->
+  <!-- Y-value legend -->
   <div class="map-legend" id="map-legend" style="display:none">
-    <div class="legend-title">Median Income</div>
+    <div class="legend-title" id="legend-title">Value</div>
     <div class="legend-grad" id="legend-grad"></div>
     <div class="legend-labels"><span id="leg-min">—</span><span id="leg-max">—</span></div>
   </div>
@@ -163,27 +169,54 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://d3js.org/d3.v7.min.js"></script>
-<script src="data/results_nyc.js"></script>
 
 <script>
 'use strict';
+
+// ── dataset registry ──────────────────────────────────────
+const DATASETS = [
+  {
+    label:      'NYC Median Income',
+    url:        'data/results_nyc.json',
+    yField:     'income',
+    yLabel:     'Median Income',
+    yUnit:      '$',
+    pointLabel: 'tracts',
+    radiusMin:  200, radiusMax: 5000, radiusDefault: 2000,
+    dotColors:  ['#93c5fd', '#1e3a8a'],
+  },
+  {
+    label:      'Seattle House Price',
+    url:        'data/results.json',
+    yField:     'price',
+    yLabel:     'House Price',
+    yUnit:      '$',
+    pointLabel: 'houses',
+    radiusMin:  200, radiusMax: 5000, radiusDefault: 2000,
+    dotColors:  ['#86efac', '#14532d'],
+  },
+  {
+    label:      'US Politics Voting',
+    url:        'data/results_politics.json',
+    yField:     'y_val',
+    yLabel:     'Dem. Vote %',
+    yUnit:      '%',
+    pointLabel: 'counties',
+    radiusMin:  10000, radiusMax: 400000, radiusDefault: 80000,
+    dotColors:  ['#fca5a5', '#1d4ed8'],
+  },
+];
 
 // ── constants ─────────────────────────────────────────────
 const EXCLUDE    = new Set(['lon', 'lat']);
 const DEG_PER_M  = 1 / 111000;
 const MAX_SPOKES = 19;
 
-const MAX_H        = 90;    // max bar height (px) for SHAP and uncertainty arcs
-const LABEL_PAD    = 12;    // padding outside bars before label
-const SUB_GAP      = 0.006; // angular gap between SHAP and uncertainty sub-arcs
-const SLICE_GAP    = 0.018; // angular gap between slices
-const EXPAND_FACTOR = 4.0;  // hovered slice width multiplier
-
-const PALETTE = [
-  '#e63946','#2a9d8f','#e9c46a','#f4a261','#264653',
-  '#a8dadc','#457b9d','#1d3557','#6a994e','#bc4749',
-  '#e76f51','#2b9348'
-];
+const MAX_H         = 90;
+const LABEL_PAD     = 12;
+const SUB_GAP       = 0.006;
+const SLICE_GAP     = 0.018;
+const EXPAND_FACTOR = 4.0;
 
 const SHORT = {
   UNEMP_RATE:'Unemploy.', gini:'Gini', profes_p:'Profession',
@@ -195,110 +228,173 @@ const SHORT = {
 };
 
 // ── state ─────────────────────────────────────────────────
-let data, features, featureLabels;
-let map, circleLayer, centerLatLng;
-let radiusM   = 2000;
+let data, features, featureLabels, currentDS;
+let fmtY = v => String(v);   // dynamic value formatter
+let map, markersLayer, circleLayer, centerLatLng;
+let radiusM    = 2000;
 let currentAgg = null;
-let hoveredIdx = null;   // which feature slice is expanded
-let sortedFeatures = []; // cached sorted feature list
+let hoveredIdx = null;
+let sortedFeatures = [];
 
-// ── init ──────────────────────────────────────────────────
-function init() {
-  if (typeof window.GeoXCPDataNYC === 'undefined') return;
+// ── dataset loading ────────────────────────────────────────
+async function loadDataset(ds) {
+  // Reset radial state
+  currentAgg = null; hoveredIdx = null; sortedFeatures = [];
+  if (circleLayer) { circleLayer.remove(); circleLayer = null; }
+  centerLatLng = null;
+  d3.select('#radial-svg').selectAll('*').remove();
+  document.getElementById('radial-tooltip').classList.add('hidden');
+  document.getElementById('map-hint').classList.remove('hidden');
+  document.getElementById('map-legend').style.display    = 'none';
+  document.getElementById('controls').style.display      = 'none';
+  document.getElementById('radial-legend').style.display = 'none';
+
+  let json;
+  try {
+    const resp = await fetch(ds.url);
+    if (!resp.ok) throw new Error(resp.statusText);
+    json = await resp.json();
+  } catch(e) {
+    const nd = document.getElementById('no-data');
+    nd.querySelector('h2').textContent = 'Failed to load data';
+    nd.querySelector('p').textContent  = `Could not fetch ${ds.url}: ${e.message}`;
+    nd.style.display = 'flex';
+    return;
+  }
   document.getElementById('no-data').style.display = 'none';
+  setupData(json, ds);
+}
 
-  data          = window.GeoXCPDataNYC;
+function setupData(json, ds) {
+  currentDS = ds;
+  data          = json;
   features      = data.features.filter(f => !EXCLUDE.has(f));
   featureLabels = data.feature_labels;
 
-  map = L.map('map', { zoomControl: false, scrollWheelZoom: false, doubleClickZoom: false, touchZoom: false, boxZoom: false, keyboard: false, dragging: false });
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-    attribution: '© OpenStreetMap © CARTO', subdomains: 'abcd', maxZoom: 19
-  }).addTo(map);
+  // Resolve effective y-field and label from meta (politics has it) or dataset config
+  const yField = data.meta.y_field || ds.yField;
+  const yLabel = data.meta.y_label || ds.yLabel;
+  const yUnit  = data.meta.y_unit  || ds.yUnit;
 
-  // Auto-fit map to data extent with padding
-  const lats = data.points.map(p => p.lat);
-  const lons = data.points.map(p => p.lon);
-  map.fitBounds([
-    [Math.min(...lats), Math.min(...lons)],
-    [Math.max(...lats), Math.max(...lons)]
-  ], { padding: [40, 40] });
+  // Dynamic value formatter
+  if (yUnit === '%') {
+    fmtY = v => v.toFixed(1) + '%';
+  } else if (yUnit === '$') {
+    fmtY = fmt$;
+  } else {
+    fmtY = v => Number(v).toFixed(2);
+  }
 
-  const incomes = data.points.map(p => p.income);
-  const iMin = d3.quantile(incomes.slice().sort(d3.ascending), 0.02);
-  const iMax = d3.quantile(incomes.slice().sort(d3.ascending), 0.98);
-  // Use blue gradient for income dots — clearly distinct from purple/teal SHAP arcs and amber uncertainty arcs
-  const cScale = d3.scaleSequential(t => d3.interpolateRgb('#93c5fd', '#1e3a8a')(t)).domain([iMin, iMax]);
+  // Init map (first call) or reuse
+  if (!map) {
+    map = L.map('map', { zoomControl: false, scrollWheelZoom: false, doubleClickZoom: false, touchZoom: false, boxZoom: false, keyboard: false, dragging: false });
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '© OpenStreetMap © CARTO', subdomains: 'abcd', maxZoom: 19
+    }).addTo(map);
 
-  const layer = L.layerGroup().addTo(map);
+    // Map events (registered once)
+    map.on('click', e => {
+      if (!circleLayer) {
+        placeCircle(e.latlng);
+        centerLatLng = e.latlng;
+        onCircleUpdate();
+        document.getElementById('map-hint').classList.add('hidden');
+      }
+    });
+    map.on('mousedown', e => {
+      if (!circleLayer) return;
+      let moved = false;
+      const mapEl = document.getElementById('map');
+      const onMove = ev => {
+        if (!moved) { moved = true; mapEl.classList.add('dragging'); }
+        centerLatLng = ev.latlng;
+        circleLayer.setLatLng(ev.latlng);
+        onCircleUpdate();
+      };
+      const onUp = () => {
+        mapEl.classList.remove('dragging');
+        map.off('mousemove', onMove);
+        map.off('mouseup', onUp);
+        if (!moved) {
+          centerLatLng = e.latlng;
+          circleLayer.setLatLng(e.latlng);
+          onCircleUpdate();
+        }
+      };
+      map.on('mousemove', onMove);
+      map.on('mouseup', onUp);
+    });
+    map.on('move zoom', redrawRadial);
+
+    ['controls','map-legend'].forEach(id => {
+      const el = document.getElementById(id);
+      L.DomEvent.disableClickPropagation(el);
+      L.DomEvent.disableScrollPropagation(el);
+    });
+
+    const slider = document.getElementById('radius-slider');
+    slider.addEventListener('input', () => {
+      radiusM = +slider.value;
+      document.getElementById('radius-val').textContent = fmtRadius(radiusM);
+      document.getElementById('chip-r').textContent     = fmtRadius(radiusM);
+      updateGrad(slider);
+      if (circleLayer) { circleLayer.setRadius(radiusM); onCircleUpdate(); }
+    });
+  }
+
+  // Remove old markers
+  if (markersLayer) { markersLayer.remove(); markersLayer = null; }
+
+  // Auto-zoom to dataset extent
+  const latMin = data.meta.lat_min ?? Math.min(...data.points.map(p => p.lat));
+  const latMax = data.meta.lat_max ?? Math.max(...data.points.map(p => p.lat));
+  const lonMin = data.meta.lon_min ?? Math.min(...data.points.map(p => p.lon));
+  const lonMax = data.meta.lon_max ?? Math.max(...data.points.map(p => p.lon));
+  map.fitBounds([[latMin, lonMin], [latMax, lonMax]], { padding: [40, 40] });
+
+  // Color scale for dots
+  const vals = data.points.map(p => p[yField]).filter(v => v != null);
+  const vMin = d3.quantile(vals.slice().sort(d3.ascending), 0.02);
+  const vMax = d3.quantile(vals.slice().sort(d3.ascending), 0.98);
+  const cScale = d3.scaleSequential(t => d3.interpolateRgb(ds.dotColors[0], ds.dotColors[1])(t)).domain([vMin, vMax]);
+
+  // Draw markers
+  markersLayer = L.layerGroup().addTo(map);
   data.points.forEach(pt => {
+    const val = pt[yField];
     L.circleMarker([pt.lat, pt.lon], {
-      radius: 4, fillColor: cScale(pt.income),
+      radius: 4, fillColor: val != null ? cScale(val) : '#aaa',
       color: '#fff', weight: 0.5, fillOpacity: 0.8
-    }).bindTooltip(`<b>${fmt$(pt.income)}</b> median income`, { sticky: true })
-      .addTo(layer);
+    }).bindTooltip(`<b>${val != null ? fmtY(val) : '—'}</b> ${yLabel}`, { sticky: true })
+      .addTo(markersLayer);
   });
 
-  buildLegend(cScale, iMin, iMax);
+  // Legend
+  buildLegend(cScale, vMin, vMax, yLabel);
+
+  // Radius slider range
+  const slider = document.getElementById('radius-slider');
+  slider.min   = ds.radiusMin;
+  slider.max   = ds.radiusMax;
+  slider.value = ds.radiusDefault;
+  radiusM      = ds.radiusDefault;
+  updateGrad(slider);
+
+  // Header and chips
+  document.getElementById('header-title').textContent = `${ds.label} — Radial Focus Explorer`;
+  const nTotal = data.meta.n_total || (data.meta.n_train + data.meta.n_calib + data.meta.n_test);
+  document.getElementById('chip-n').textContent = `${nTotal} ${ds.pointLabel}`;
+  document.getElementById('chip-r').textContent = fmtRadius(radiusM);
+  document.getElementById('radius-val').textContent = fmtRadius(radiusM);
+
   document.getElementById('map-legend').style.display    = '';
   document.getElementById('controls').style.display      = '';
   document.getElementById('radial-legend').style.display = '';
-  document.getElementById('chip-n').textContent = `${data.meta.n_total} tracts`;
-  updateRadialLegend();
+  updateRadialLegend(yLabel, ds);
+}
 
-  ['controls','map-legend'].forEach(id => {
-    const el = document.getElementById(id);
-    L.DomEvent.disableClickPropagation(el);
-    L.DomEvent.disableScrollPropagation(el);
-  });
-
-  // First click places circle; subsequent mousedown anywhere drags it in real-time
-  map.on('click', e => {
-    if (!circleLayer) {
-      placeCircle(e.latlng);
-      centerLatLng = e.latlng;
-      onCircleUpdate();
-      document.getElementById('map-hint').classList.add('hidden');
-    }
-  });
-
-  map.on('mousedown', e => {
-    if (!circleLayer) return;
-    let moved = false;
-    const mapEl = document.getElementById('map');
-    const onMove = ev => {
-      if (!moved) { moved = true; mapEl.classList.add('dragging'); }
-      centerLatLng = ev.latlng;
-      circleLayer.setLatLng(ev.latlng);
-      onCircleUpdate();
-    };
-    const onUp = () => {
-      mapEl.classList.remove('dragging');
-      map.off('mousemove', onMove);
-      map.off('mouseup', onUp);
-      if (!moved) {
-        // treat as click: teleport circle
-        centerLatLng = e.latlng;
-        circleLayer.setLatLng(e.latlng);
-        onCircleUpdate();
-      }
-    };
-    map.on('mousemove', onMove);
-    map.on('mouseup', onUp);
-  });
-
-  map.on('move zoom', redrawRadial);
-
-  const slider = document.getElementById('radius-slider');
-  updateGrad(slider);
-  slider.addEventListener('input', () => {
-    radiusM = +slider.value;
-    document.getElementById('radius-val').textContent = (radiusM / 1000).toFixed(1) + ' km';
-    document.getElementById('chip-r').textContent     = (radiusM / 1000).toFixed(1) + ' km';
-    updateGrad(slider);
-    if (circleLayer) { circleLayer.setRadius(radiusM); onCircleUpdate(); }
-  });
-
+function fmtRadius(m) {
+  return m >= 1000 ? (m / 1000).toFixed(0) + ' km' : m + ' m';
 }
 
 // ── circle ────────────────────────────────────────────────
@@ -325,11 +421,14 @@ function aggregateInCircle() {
     pts.push({ pt, w: Math.exp(-d * d / (2 * sigma * sigma)) });
   }
   if (!pts.length) return { n: 0, features: {} };
-  const sumW = pts.reduce((s, d) => s + d.w, 0);
+  // Only aggregate test points (those that have SHAP features)
+  const testPts = pts.filter(({ pt }) => pt.features);
+  if (!testPts.length) return { n: pts.length, features: {} };
+  const sumW = testPts.reduce((s, d) => s + d.w, 0);
   const res = {};
   for (const f of features) {
     let sw = 0, sa = 0, su = 0;
-    for (const { pt, w } of pts) {
+    for (const { pt, w } of testPts) {
       const fd = pt.features[f];
       sw += w * fd.shap;
       sa += w * Math.abs(fd.shap);
@@ -343,15 +442,16 @@ function aggregateInCircle() {
 function onCircleUpdate() {
   currentAgg = aggregateInCircle();
   hoveredIdx = null;
-  if (currentAgg && currentAgg.n) {
+  if (currentAgg && currentAgg.n && Object.keys(currentAgg.features).length) {
     sortedFeatures = features
       .map(f => ({ f, ...currentAgg.features[f] }))
+      .filter(d => d.abshap != null)
       .sort((a, b) => b.abshap - a.abshap)
       .slice(0, MAX_SPOKES);
   } else {
     sortedFeatures = [];
   }
-  updateRadialLegend();
+  updateRadialLegend(currentDS ? (data.meta.y_label || currentDS.yLabel) : '', currentDS);
   redrawRadial();
 }
 
@@ -511,7 +611,7 @@ function redrawRadial() {
     .attr('fill', '#6e0f1c')
     .attr('opacity', d => hoveredIdx === null ? 1 : (d.idx === hoveredIdx ? 1 : 0.3))
     .style('pointer-events', 'none')
-    .text(d => SHORT[d.f] || d.f);
+    .text(d => SHORT[d.f] || (featureLabels && featureLabels[d.f]) || d.f);
 
   // Inline value labels inside hovered slice
   if (hoveredIdx !== null) {
@@ -531,7 +631,7 @@ function redrawRadial() {
     sg.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
       .attr('font-size', 12).attr('font-weight', 700).attr('font-family', 'Inter, sans-serif')
       .attr('fill', getColor(d.idx))
-      .text(fmt$(d.abshap));
+      .text(fmtY(d.abshap));
 
     // Uncertainty value — centered in right sub-arc at mid-height
     const uncMid  = (d.midAngle + SUB_GAP / 2 + d.endAngle) / 2;
@@ -545,7 +645,7 @@ function redrawRadial() {
       .append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
       .attr('font-size', 9).attr('font-weight', 600).attr('font-family', 'Inter, sans-serif')
       .attr('fill', '#92400e')
-      .text('±' + fmt$(d.uncert));
+      .text('±' + fmtY(d.uncert));
   }
 
   // Hit zones (painted last = on top, intercept mouse before background circle)
@@ -579,18 +679,19 @@ function showTooltip(d, event) {
   const uncPct    = (d.uncert / maxUncert) * 100;
   const i         = sortedFeatures.indexOf(d);
 
+  const ptLabel = currentDS ? currentDS.pointLabel : 'points';
   document.getElementById('radial-tooltip').innerHTML = `
     <div class="tt-name">${featureLabels[d.f]}</div>
-    <div class="tt-row"><span>Mean |SHAP|</span><span class="tt-val">${fmt$(d.abshap)}</span></div>
+    <div class="tt-row"><span>Mean |SHAP|</span><span class="tt-val">${fmtY(d.abshap)}</span></div>
     <div class="tt-bar-wrap">
       <div class="tt-bar-label">Mean |SHAP| (relative)</div>
       <div class="tt-bar-track"><div class="tt-bar-fill" style="width:${barPct.toFixed(1)}%;background:${getColor(i)}"></div></div>
     </div>
     <div class="tt-bar-wrap">
-      <div class="tt-bar-label">Geo-uncertainty ±${fmt$(d.uncert)}</div>
+      <div class="tt-bar-label">Geo-uncertainty ±${fmtY(d.uncert)}</div>
       <div class="tt-uncert-track"><div class="tt-bar-fill" style="width:${uncPct.toFixed(1)}%;background:#f48420"></div></div>
     </div>
-    <div class="tt-footer">${currentAgg.n} tracts · ${(radiusM/1000).toFixed(1)} km · Gaussian weighted</div>`;
+    <div class="tt-footer">${currentAgg.n} ${ptLabel} · ${fmtRadius(radiusM)} · Gaussian weighted</div>`;
 
   document.getElementById('radial-tooltip').classList.remove('hidden');
   if (event) moveTooltip(event);
@@ -607,41 +708,35 @@ function moveTooltip(event) {
 }
 
 // ── radial legend (HTML card) ──────────────────────────────
-function updateRadialLegend() {
+function updateRadialLegend(yLabel, ds) {
   const el = document.getElementById('radial-legend');
   if (!el) return;
+  const dotLabel = yLabel || 'Value';
+  const dotColors = ds ? ds.dotColors : ['#93c5fd', '#1e3a8a'];
+  const ptLabel   = ds ? ds.pointLabel : 'points';
 
   let html = `<div class="legend-title">Radial Chart</div>`;
-
-  // Section 1: SHAP arcs (left half of each slice)
   html += `<div class="rl-section">
-    <div class="rl-section-title">Left arc — Mean |SHAP|</div>`;
-  html += `<div class="rl-row" style="margin-top:4px"><span class="rl-swatch" style="background:#eb0f6f"></span>Mean |SHAP| (arc length)</div>`;
-  html += `</div>`;
-
-  // Section 2: Uncertainty arc (right half)
+    <div class="rl-section-title">Left arc — Mean |SHAP|</div>
+    <div class="rl-row" style="margin-top:4px"><span class="rl-swatch" style="background:#eb0f6f"></span>Mean |SHAP| (arc length)</div>
+  </div>`;
   html += `<hr class="rl-divider">
   <div class="rl-section">
     <div class="rl-section-title">Geo-uncertainty (right arc)</div>
     <div class="rl-row"><span class="rl-swatch" style="background:#f48420"></span>Prediction interval width</div>
   </div>`;
-
-  // Section 3: Income dots
   html += `<hr class="rl-divider">
   <div class="rl-section">
-    <div class="rl-section-title">Census tract dots</div>
+    <div class="rl-section-title">${ptLabel} dots</div>
     <div class="rl-row">
-      <span class="rl-grad-swatch" style="background:linear-gradient(to right,#93c5fd,#1e3a8a)"></span>
-      Median income
+      <span class="rl-grad-swatch" style="background:linear-gradient(to right,${dotColors[0]},${dotColors[1]})"></span>
+      ${dotLabel}
     </div>
     <div style="display:flex;justify-content:space-between;font-size:9.5px;color:var(--light);margin-top:1px">
       <span>Low</span><span>High</span>
     </div>
   </div>`;
-
-  // Scale note
   html += `<p class="rl-note">Arc length = relative magnitude within circle</p>`;
-
   el.innerHTML = html;
 }
 
@@ -654,11 +749,12 @@ function getColor(i) {
 }
 
 // ── legend ─────────────────────────────────────────────────
-function buildLegend(scale, min, max) {
+function buildLegend(scale, min, max, yLabel) {
   const stops = d3.range(0, 1.01, 0.1).map(t => scale(min + t*(max-min))).join(',');
   document.getElementById('legend-grad').style.background = `linear-gradient(to right,${stops})`;
-  document.getElementById('leg-min').textContent = fmt$(min);
-  document.getElementById('leg-max').textContent = fmt$(max);
+  document.getElementById('legend-title').textContent = yLabel || 'Value';
+  document.getElementById('leg-min').textContent = fmtY(min);
+  document.getElementById('leg-max').textContent = fmtY(max);
 }
 
 // ── utils ──────────────────────────────────────────────────
@@ -673,7 +769,14 @@ function updateGrad(el) {
 }
 
 // ── boot ───────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', init);
+document.addEventListener('DOMContentLoaded', () => {
+  const sel = document.getElementById('dataset-sel');
+  sel.addEventListener('change', () => {
+    const ds = DATASETS[+sel.value];
+    loadDataset(ds);
+  });
+  loadDataset(DATASETS[0]);
+});
 </script>
 </body>
 </html>

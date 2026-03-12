@@ -96,6 +96,19 @@
       border: 1px solid #334155;
     }
 
+    .ds-select {
+      background: #1e293b;
+      color: #e2e8f0;
+      font-size: 12px;
+      font-weight: 500;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 5px 10px;
+      cursor: pointer;
+      outline: none;
+    }
+    .ds-select:focus { border-color: #2563eb; }
+
     /* ── MAIN LAYOUT ── */
     .app-body {
       display: grid;
@@ -680,11 +693,14 @@
     </div>
   </div>
   <div class="header-sep"></div>
+  <select class="ds-select" id="dataset-sel">
+    <option value="0">Seattle House Price</option>
+    <option value="1">NYC Median Income</option>
+    <option value="2">US Politics Voting</option>
+  </select>
   <div class="header-tags">
-    <span class="tag">Seattle House Price</span>
-    <span class="tag">n=300 test points</span>
+    <span class="tag" id="tag-n">—</span>
     <span class="tag">90% coverage target</span>
-    <span class="tag">10 features</span>
   </div>
 </header>
 
@@ -738,9 +754,9 @@
             across train/calibration/test splits.
           </div>
           <div class="step-stats">
-            <span class="stat-pill"><span class="stat-label">Train</span><span class="stat-value info">2,400 pts</span></span>
-            <span class="stat-pill"><span class="stat-label">Calib</span><span class="stat-value warn">300 pts</span></span>
-            <span class="stat-pill"><span class="stat-label">Test</span><span class="stat-value">300 pts</span></span>
+            <span class="stat-pill"><span class="stat-label">Train</span><span class="stat-value info" id="stat-train-pts">— pts</span></span>
+            <span class="stat-pill"><span class="stat-label">Calib</span><span class="stat-value warn" id="stat-calib-pts">— pts</span></span>
+            <span class="stat-pill"><span class="stat-label">Test</span><span class="stat-value" id="stat-test-pts">— pts</span></span>
           </div>
         </div>
       </div>
@@ -961,8 +977,6 @@
   </div>
 </div>
 
-<!-- Scripts: data first, then libraries, then app -->
-<script src="data/results.js" onerror="window._dataLoadError=true"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://d3js.org/d3.v7.min.js"></script>
 
@@ -971,13 +985,21 @@
 // ║              GeoXCP Interactive Application              ║
 // ╚══════════════════════════════════════════════════════════╝
 
+// ── Dataset registry ───────────────────────────────────────
+const DATASETS = [
+  { label: 'Seattle House Price', url: 'data/results.json',          yField: 'price',  yLabel: 'House Price',   yUnit: '$',  pointLabel: 'houses' },
+  { label: 'NYC Median Income',   url: 'data/results_nyc.json',      yField: 'income', yLabel: 'Median Income', yUnit: '$',  pointLabel: 'tracts' },
+  { label: 'US Politics Voting',  url: 'data/results_politics.json', yField: 'y_val',  yLabel: 'Dem. Vote %',   yUnit: '%',  pointLabel: 'counties' },
+];
+
 const App = (() => {
   // ── State ──────────────────────────────────────────────
   let data = null;
+  let currentDS = null;
   let leafletMap = null;
   let markers = [];
   let selectedMarker = null;
-  let currentFeature = 'sqft_living';
+  let currentFeature = null;
   let currentMetric = 'shap';
   let currentTab = 'summary';
   let selectedPoint = null;
@@ -997,49 +1019,78 @@ const App = (() => {
     '#db2777','#0891b2','#65a30d','#9a3412','#475569'
   ];
 
-  // ── Init ───────────────────────────────────────────────
-  function init() {
-    // Check if data is available
-    if (typeof window.GeoXCPData === 'undefined' || window._dataLoadError) {
-      console.warn('GeoXCPData not found. Please run generate_data.py first.');
+  // ── Dataset loading ────────────────────────────────────
+  async function loadDataset(ds) {
+    let json;
+    try {
+      const resp = await fetch(ds.url);
+      if (!resp.ok) throw new Error(resp.statusText);
+      json = await resp.json();
+    } catch(e) {
+      console.error('Failed to load dataset:', e);
       return;
     }
+    setupData(json, ds);
+  }
 
-    data = window.GeoXCPData;
+  function setupData(json, ds) {
+    currentDS      = ds;
+    data           = json;
+    selectedPoint  = null;
+    selectedMarker = null;
+
+    // Resolve y-field and label from meta or dataset config
+    const yField = data.meta.y_field || ds.yField;
+    const yLabel = data.meta.y_label || ds.yLabel;
+
+    currentFeature = data.features.includes('sqft_living') ? 'sqft_living'
+                   : data.features.includes('X1')          ? 'X1'
+                   : data.features[0];
+
     document.getElementById('no-data-overlay').style.display = 'none';
 
-    currentFeature = data.features.includes('sqft_living') ? 'sqft_living' : data.features[0];
+    // Map: create once, then fitBounds on each load
+    if (!leafletMap) {
+      leafletMap = L.map('map', { zoomControl: true, attributionControl: true });
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: '© <a href="https://www.openstreetmap.org/">OpenStreetMap</a> © <a href="https://carto.com/">CARTO</a>',
+        subdomains: 'abcd', maxZoom: 19
+      }).addTo(leafletMap);
 
-    initMap();
-    initControls();
-    populateSidebar();
-    renderAccuracyTable();
-    renderSummaryChart();
-  }
+      document.querySelectorAll('.metric-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.metric-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          currentMetric = btn.dataset.metric;
+          renderMarkers();
+          updateSidebarFeature();
+        });
+      });
 
-  // ── Map initialization ─────────────────────────────────
-  function initMap() {
-    leafletMap = L.map('map', {
-      center: [47.535, -122.22],
-      zoom: 11,
-      zoomControl: true,
-      attributionControl: true
-    });
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          currentTab = btn.dataset.tab;
+          document.getElementById('pane-summary').classList.toggle('hidden', currentTab !== 'summary');
+          document.getElementById('pane-detail').classList.toggle('hidden', currentTab !== 'detail');
+          if (currentTab === 'summary') renderSummaryChart();
+          if (currentTab === 'detail' && selectedPoint) renderDetailChart(selectedPoint);
+        });
+      });
+    }
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      attribution: '© <a href="https://www.openstreetmap.org/">OpenStreetMap</a> © <a href="https://carto.com/">CARTO</a>',
-      subdomains: 'abcd',
-      maxZoom: 19
-    }).addTo(leafletMap);
+    // Auto-zoom to data extent
+    const latMin = data.meta.lat_min ?? Math.min(...data.points.map(p => p.lat));
+    const latMax = data.meta.lat_max ?? Math.max(...data.points.map(p => p.lat));
+    const lonMin = data.meta.lon_min ?? Math.min(...data.points.map(p => p.lon));
+    const lonMax = data.meta.lon_max ?? Math.max(...data.points.map(p => p.lon));
+    leafletMap.fitBounds([[latMin, lonMin], [latMax, lonMax]], { padding: [20, 20] });
 
-    renderMarkers();
-  }
-
-  // ── Controls initialization ────────────────────────────
-  function initControls() {
+    // Rebuild feature dropdown
     const featureSelect = document.getElementById('feature-select');
+    featureSelect.innerHTML = '';
     const labels = data.feature_labels || FEATURE_LABELS;
-
     data.features.forEach(f => {
       const opt = document.createElement('option');
       opt.value = f;
@@ -1047,33 +1098,35 @@ const App = (() => {
       if (f === currentFeature) opt.selected = true;
       featureSelect.appendChild(opt);
     });
-
-    featureSelect.addEventListener('change', e => {
+    // Re-attach change listener (remove old one by cloning)
+    const newSel = featureSelect.cloneNode(true);
+    featureSelect.parentNode.replaceChild(newSel, featureSelect);
+    newSel.addEventListener('change', e => {
       currentFeature = e.target.value;
       onFeatureChange();
     });
 
-    document.querySelectorAll('.metric-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.metric-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        currentMetric = btn.dataset.metric;
-        renderMarkers();
-        updateSidebarFeature();
-      });
-    });
+    // Update header tag
+    const nTotal = data.meta.n_total || (data.meta.n_train + data.meta.n_calib + data.meta.n_test);
+    document.getElementById('tag-n').textContent = `n=${data.points.length} test ${ds.pointLabel}`;
 
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        currentTab = btn.dataset.tab;
-        document.getElementById('pane-summary').classList.toggle('hidden', currentTab !== 'summary');
-        document.getElementById('pane-detail').classList.toggle('hidden', currentTab !== 'detail');
-        if (currentTab === 'summary') renderSummaryChart();
-        if (currentTab === 'detail' && selectedPoint) renderDetailChart(selectedPoint);
-      });
-    });
+    // Reset detail pane
+    document.getElementById('point-info-text').textContent = 'Click a point on the map';
+    document.getElementById('info-dot').className = 'info-dot';
+
+    // Rebuild accuracy table
+    document.getElementById('accuracy-tbody').innerHTML = '';
+    renderAccuracyTable();
+
+    // Render
+    renderMarkers();
+    populateSidebar();
+    renderSummaryChart();
+  }
+
+  // ── Controls initialization ────────────────────────────
+  function initControls() {
+    // (Now handled inside setupData)
   }
 
   function onFeatureChange() {
@@ -1091,6 +1144,9 @@ const App = (() => {
       setText('train-r2', fmt2(m.train_r2));
       setText('test-r2', fmt2(m.test_r2));
       setText('test-rmse', fmt2(m.test_rmse));
+      setText('stat-train-pts', `${(m.n_train || 0).toLocaleString()} pts`);
+      setText('stat-calib-pts', `${(m.n_calib || 0).toLocaleString()} pts`);
+      setText('stat-test-pts', `${(m.n_test || 0).toLocaleString()} pts`);
     }
     updateSidebarFeature();
   }
@@ -1185,9 +1241,12 @@ const App = (() => {
     markers.forEach(m => m.remove());
     markers = [];
 
+    // Only use points that have SHAP features (test points)
+    const testPoints = data.points.filter(p => p.features);
+
     // Color encodes SHAP value (actual or predicted), size encodes geo_uncertainty
-    const shapValues = data.points.map(p => getMetricValue(p, currentFeature, currentMetric));
-    const uncValues = data.points.map(p => p.features[currentFeature].geo_uncertainty);
+    const shapValues = testPoints.map(p => getMetricValue(p, currentFeature, currentMetric));
+    const uncValues = testPoints.map(p => p.features[currentFeature].geo_uncertainty);
     const colorScale = getColorScale('shap', shapValues);
     const minUnc = d3.min(uncValues) || 0;
     const maxUnc = d3.max(uncValues) || 1;
@@ -1200,7 +1259,7 @@ const App = (() => {
       return MIN_R + t * (MAX_R - MIN_R);
     }
 
-    data.points.forEach((point, idx) => {
+    testPoints.forEach((point, idx) => {
       const val = shapValues[idx];
       const color = colorScale(val);
       const radius = sizeScale(uncValues[idx]);
@@ -1217,10 +1276,12 @@ const App = (() => {
       }).addTo(leafletMap);
 
       // Tooltip on hover
+      const yField = currentDS ? (data.meta.y_field || currentDS.yField) : 'price';
+      const yVal = point[yField];
       marker.bindTooltip(`
         <div class="popup-header">
           <span>${labels[currentFeature] || currentFeature}</span>
-          <span class="popup-price">${fmtPrice(point.price)}</span>
+          <span class="popup-price">${yVal != null ? fmtY(yVal) : '—'}</span>
         </div>
         <div class="popup-row">
           <span class="popup-key">Value</span>
@@ -1258,9 +1319,11 @@ const App = (() => {
     selectedPoint = point;
 
     // Update info badge
+    const yField = currentDS ? (data.meta.y_field || currentDS.yField) : 'price';
+    const yLabel = currentDS ? (data.meta.y_label || currentDS.yLabel) : 'Price';
     document.getElementById('info-dot').className = 'info-dot selected';
     document.getElementById('point-info-text').textContent =
-      `Point #${idx+1} | ${fmtPrice(point.price)} | (${fmt2(point.lat)}°N, ${fmt2(Math.abs(point.lon))}°W)`;
+      `Point #${idx+1} | ${yLabel}: ${fmtY(point[yField])} | (${fmt2(point.lat)}°N, ${fmt2(Math.abs(point.lon))}°W)`;
 
     // Switch to detail tab
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -1630,7 +1693,7 @@ const App = (() => {
       .attr('x', w / 2).attr('y', h + 26)
       .attr('text-anchor', 'middle')
       .attr('font-size', 11).attr('fill', '#94a3b8')
-      .text('SHAP Value (contribution to price prediction)');
+      .text(`SHAP Value (contribution to ${currentDS ? (data.meta.y_label || currentDS.yLabel) : 'prediction'})`);
 
     // Legend
     const legItems = [
@@ -1659,7 +1722,11 @@ const App = (() => {
     svg.append('text')
       .attr('x', 10).attr('y', 10)
       .attr('font-size', 11).attr('font-weight', '600').attr('fill', '#1e293b')
-      .text(`SHAP Explanations — ${fmtPrice(point.price)} house at (${fmt2(point.lat)}°N, ${fmt2(Math.abs(point.lon))}°W)`);
+      .text((() => {
+        const yField = currentDS ? (data.meta.y_field || currentDS.yField) : 'price';
+        const yLabel = currentDS ? (data.meta.y_label || currentDS.yLabel) : 'Price';
+        return `SHAP Explanations — ${yLabel}: ${fmtY(point[yField])} at (${fmt2(point.lat)}°N, ${fmt2(Math.abs(point.lon))}°W)`;
+      })());
   }
 
   // ── Utilities ──────────────────────────────────────────
@@ -1669,6 +1736,14 @@ const App = (() => {
     if (Math.abs(n) >= 100) return n.toFixed(0);
     if (Math.abs(n) >= 10) return n.toFixed(1);
     return n.toFixed(2);
+  }
+
+  // Dynamic y-value formatter based on current dataset
+  function fmtY(v) {
+    if (!currentDS) return fmtPrice(v);
+    const unit = currentDS.yUnit || (data.meta && data.meta.y_unit) || '$';
+    if (unit === '%') return parseFloat(v).toFixed(1) + '%';
+    return fmtPrice(v);
   }
 
   // price is in units of $10k (e.g., 107.9 → $1,079,000)
@@ -1697,12 +1772,16 @@ const App = (() => {
     if (currentTab === 'detail' && selectedPoint) renderDetailChart(selectedPoint);
   });
 
-  return { init };
+  return { loadDataset };
 })();
 
 // Start the app when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
-  App.init();
+  const sel = document.getElementById('dataset-sel');
+  sel.addEventListener('change', () => {
+    App.loadDataset(DATASETS[+sel.value]);
+  });
+  App.loadDataset(DATASETS[0]);
 });
 </script>
 
