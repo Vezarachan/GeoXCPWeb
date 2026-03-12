@@ -987,9 +987,9 @@
 
 // ── Dataset registry ───────────────────────────────────────
 const DATASETS = [
-  { label: 'Seattle House Price', url: 'data/results.json',          scriptUrl: 'data/results.js',          varName: 'GeoXCPData',          yField: 'price',  yLabel: 'House Price',   yUnit: '$',  pointLabel: 'houses' },
-  { label: 'NYC Median Income',   url: 'data/results_nyc.json',      scriptUrl: 'data/results_nyc.js',      varName: 'GeoXCPDataNYC',       yField: 'income', yLabel: 'Median Income', yUnit: '$',  pointLabel: 'tracts' },
-  { label: 'US Politics Voting',  url: 'data/results_politics.json', scriptUrl: 'data/results_politics.js', varName: 'GeoXCPDataPolitics',  yField: 'y_val',  yLabel: 'Dem. Vote %',   yUnit: '%',  pointLabel: 'counties' },
+  { label: 'Seattle House Price', url: 'data/results.json',          scriptUrl: 'data/results.js',          varName: 'GeoXCPData',          yField: 'price',  yLabel: 'House Price',   yUnit: '$',  pointLabel: 'houses',   markerMinR: 4, markerMaxR: 18 },
+  { label: 'NYC Median Income',   url: 'data/results_nyc.json',      scriptUrl: 'data/results_nyc.js',      varName: 'GeoXCPDataNYC',       yField: 'income', yLabel: 'Median Income', yUnit: '$',  pointLabel: 'tracts',   markerMinR: 2, markerMaxR: 7  },
+  { label: 'US Politics Voting',  url: 'data/results_politics.json', scriptUrl: 'data/results_politics.js', varName: 'GeoXCPDataPolitics',  yField: 'y_val',  yLabel: 'Dem. Vote %',   yUnit: '%',  pointLabel: 'counties', markerMinR: 3, markerMaxR: 12 },
 ];
 
 const App = (() => {
@@ -1265,9 +1265,9 @@ const App = (() => {
     const maxUnc = d3.max(uncValues) || 1;
     const uncRange = maxUnc - minUnc || 1;
 
-    const MIN_R = 4, MAX_R = 18;
+    const MIN_R = currentDS ? currentDS.markerMinR : 4;
+    const MAX_R = currentDS ? currentDS.markerMaxR : 18;
     function sizeScale(v) {
-      // Normalize to actual data range for maximum visual contrast
       const t = (v - minUnc) / uncRange;
       return MIN_R + t * (MAX_R - MIN_R);
     }
