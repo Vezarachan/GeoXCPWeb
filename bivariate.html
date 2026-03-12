@@ -1,0 +1,1008 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GeoXCP | Bivariate + Radar</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden;
+      font-family: 'Inter', system-ui, sans-serif; font-size: 12px; }
+
+    #map { width: 100vw; height: 100vh; }
+
+    /* Full-map SVG overlay for radar + connector */
+    #radar-svg {
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 650;
+      display: none;
+    }
+
+    /* ── Dataset selector ── */
+    #ds-select {
+      position: absolute; top: 14px; left: 14px;
+      background: rgba(15,23,42,0.88); color: #e2e8f0;
+      border: 1px solid #334155; border-radius: 6px;
+      padding: 6px 10px; font-size: 12px; font-family: inherit;
+      z-index: 900; cursor: pointer; outline: none;
+    }
+
+    /* ── Info panel ── */
+    #info-panel {
+      position: absolute; top: 14px; right: 14px;
+      background: rgba(15,23,42,0.88); color: #e2e8f0;
+      border-radius: 8px; padding: 10px 14px;
+      z-index: 900; min-width: 220px;
+    }
+    .ip-title { font-weight: 700; font-size: 13px; color: white; margin-bottom: 6px; }
+    .ip-row { display: flex; justify-content: space-between; gap: 16px; margin-top: 3px; }
+    .ip-key { color: #94a3b8; }
+    .ip-val { font-weight: 600; }
+    #ip-hint {
+      font-size: 10.5px; color: #94a3b8; line-height: 1.6;
+    }
+    #ip-hint kbd {
+      display: inline-block;
+      background: rgba(255,255,255,0.12); border: 1px solid #475569;
+      border-radius: 3px; padding: 0 4px; font-size: 10px;
+      font-family: inherit; font-style: normal; color: #cbd5e1;
+    }
+    #ip-focus-hint {
+      display: none;
+      font-size: 10.5px; color: #93c5fd;
+      line-height: 1.5; margin-top: 4px;
+    }
+
+    /* ── Bivariate legend ── */
+    #bv-legend {
+      position: absolute; bottom: 28px; left: 14px;
+      background: rgba(255,255,255,0.93);
+      border: 1px solid #ddd; border-radius: 8px;
+      padding: 10px 13px; z-index: 900;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+    }
+    .bv-legend-title {
+      font-size: 10.5px; font-weight: 600; color: #334155;
+      margin-bottom: 8px; line-height: 1.4;
+    }
+    .bv-layout { display: flex; gap: 6px; align-items: flex-end; }
+    .bv-grid-wrap { display: flex; flex-direction: column; gap: 1px; }
+    .bv-row { display: flex; gap: 1px; }
+    .bv-cell { width: 20px; height: 20px; border-radius: 2px; }
+    .bv-axis-x {
+      display: flex; justify-content: space-between;
+      font-size: 9px; color: #94a3b8; margin-top: 3px;
+    }
+    .bv-axis-y {
+      display: flex; flex-direction: column; justify-content: space-between;
+      font-size: 9px; color: #94a3b8;
+      height: calc(3 * 20px + 2 * 1px);
+      padding-right: 4px; text-align: right;
+    }
+    .bv-axis-label {
+      font-size: 9px; color: #94a3b8; text-align: center;
+    }
+    .bv-unc-label {
+      font-size: 9px; color: #94a3b8;
+      writing-mode: vertical-lr;
+      text-orientation: mixed;
+      transform: rotate(180deg);
+      padding-bottom: 2px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="map" style="position:relative;">
+  <svg id="radar-svg"></svg>
+</div>
+
+<select id="ds-select"></select>
+
+<div id="info-panel">
+  <div class="ip-title">GeoXCP · Bivariate</div>
+  <div class="ip-row"><span class="ip-key">Dataset</span><span class="ip-val" id="ip-ds">—</span></div>
+  <div class="ip-row"><span class="ip-key">Points</span><span class="ip-val" id="ip-n">—</span></div>
+  <div class="ip-row"><span class="ip-key">Test R²</span><span class="ip-val" id="ip-r2">—</span></div>
+  <div class="ip-row" style="margin-top:6px;">
+    <span id="ip-hint">Hover point for radar<br><kbd id="ip-alt-key"></kbd>+hover → focus circle (up to 6 points)<br>Click or <kbd>Esc</kbd> to dismiss</span>
+  </div>
+  <div id="ip-focus-hint">⊙ Focus active · click or Esc to dismiss</div>
+</div>
+
+<div id="bv-legend">
+  <div class="bv-legend-title">Color: Avg |SHAP| × Avg Geo Uncertainty</div>
+  <div class="bv-layout">
+    <div class="bv-unc-label">Avg |SHAP| →</div>
+    <div class="bv-axis-y" id="bv-axis-y">
+      <span>High</span><span></span><span>Low</span>
+    </div>
+    <div>
+      <div class="bv-grid-wrap" id="bv-grid"></div>
+      <div class="bv-axis-x">
+        <span>Low</span><span style="flex:1"></span><span>High</span>
+      </div>
+      <div class="bv-axis-label">Avg Uncertainty →</div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+// ╔══════════════════════════════════════════════════════╗
+// ║  GeoXCP · Bivariate Map + Hover Radar Chart          ║
+// ╚══════════════════════════════════════════════════════╝
+
+// ── Platform hint ─────────────────────────────────────────
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+const ALT_LABEL = isMac ? '⌥ Option' : 'Alt';
+document.getElementById('ip-alt-key').textContent = ALT_LABEL;
+
+// ── Dataset registry ─────────────────────────────────────
+const DATASETS = [
+  { label: 'Seattle House Price', url: 'data/results.json',          scriptUrl: 'data/results.js',          varName: 'GeoXCPData',         yField: 'price',  yLabel: 'House Price',   yUnit: '$'    },
+  { label: 'NYC Median Income',   url: 'data/results_nyc.json',      scriptUrl: 'data/results_nyc.js',      varName: 'GeoXCPDataNYC',      yField: 'income', yLabel: 'Median Income', yUnit: '$raw' },
+  { label: 'US Politics Voting',  url: 'data/results_politics.json', scriptUrl: 'data/results_politics.js', varName: 'GeoXCPDataPolitics', yField: 'y_val',  yLabel: 'Dem. Vote %',   yUnit: '%'    },
+];
+
+// ── Bivariate color scheme (Joshua Stevens · Blue × Purple) ─
+// BIVARIATE[shap_bin 0-2][unc_bin 0-2],  0=low 2=high
+const BIVARIATE = [
+  ['#e8e8e8', '#ace4e4', '#5ac8c8'],  // low  |SHAP|
+  ['#dfb0d6', '#a5add3', '#5698b9'],  // mid  |SHAP|
+  ['#be64ac', '#8c62aa', '#3b4994'],  // high |SHAP|
+];
+
+// ── Hover radar sizing (computed dynamically in showRadar) ──
+let R_CHART  = 90;
+let R_PAD    = 50;
+let R_BOX    = R_CHART * 2 + R_PAD * 2;
+let CONN_GAP = 65;
+
+// ── Focus circle constants ────────────────────────────────
+const FOCUS_K  = 6;    // max points shown
+const R_MINI   = 78;   // mini radar radius (px)
+const MINI_GAP = 32;   // gap: circle edge → mini radar edge
+
+// ── State ────────────────────────────────────────────────
+let data       = null;
+let currentDS  = null;
+let leafletMap = null;
+let markers    = [];
+let pointStats = [];   // { point, avgShap, avgUnc, shapBin, uncBin, color }
+
+// ── Focus circle state ────────────────────────────────────
+let focusCircle    = null;   // Leaflet Circle
+let focusCenter    = null;   // L.LatLng
+let focusPxRadius  = 80;     // fixed pixel radius (visually consistent across datasets)
+let focusClearTimer = null;  // timeout id for delayed clear
+
+// Convert a fixed pixel radius to meters at the current map view
+function pxToMeters(pxR, latlng) {
+  const p1  = leafletMap.latLngToContainerPoint(latlng);
+  const ll2 = leafletMap.containerPointToLatLng(L.point(p1.x, p1.y - pxR));
+  return latlng.distanceTo(ll2);
+}
+
+// ── Bivariate legend ─────────────────────────────────────
+function buildLegend() {
+  const grid = document.getElementById('bv-grid');
+  grid.innerHTML = '';
+  for (let s = 2; s >= 0; s--) {
+    const row = document.createElement('div');
+    row.className = 'bv-row';
+    for (let u = 0; u < 3; u++) {
+      const cell = document.createElement('div');
+      cell.className = 'bv-cell';
+      cell.style.background = BIVARIATE[s][u];
+      cell.title = `|SHAP|: ${['Low','Mid','High'][s]}, Unc: ${['Low','Mid','High'][u]}`;
+      row.appendChild(cell);
+    }
+    grid.appendChild(row);
+  }
+}
+
+// ── Data loading ─────────────────────────────────────────
+function loadDataset(ds) {
+  fetch(ds.url)
+    .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+    .then(json => setup(json, ds))
+    .catch(() => {
+      if (window[ds.varName]) { setup(window[ds.varName], ds); return; }
+      const s = document.createElement('script');
+      s.src = ds.scriptUrl;
+      s.onload = () => window[ds.varName] && setup(window[ds.varName], ds);
+      document.head.appendChild(s);
+    });
+}
+
+function setup(json, ds) {
+  data      = json;
+  currentDS = ds;
+  clearFocusCircle();
+  document.getElementById('radar-svg').style.display = 'none';
+
+  // Info panel
+  document.getElementById('ip-ds').textContent = ds.label;
+  document.getElementById('ip-n').textContent  = data.points.length;
+  document.getElementById('ip-r2').textContent = data.meta.test_r2
+    ? data.meta.test_r2.toFixed(3) : '—';
+
+  // Compute per-point averages
+  const testPoints = data.points.filter(p => p.features);
+  pointStats = testPoints.map(p => {
+    const feats   = data.features;
+    const avgShap = d3.mean(feats, f => p.features[f].shap_abs ?? Math.abs(p.features[f].shap));
+    const avgUnc  = d3.mean(feats, f => p.features[f].geo_uncertainty);
+    return { point: p, avgShap, avgUnc };
+  });
+
+  // Quantile breakpoints for 3×3 bins
+  const shapSorted = pointStats.map(s => s.avgShap).sort(d3.ascending);
+  const uncSorted  = pointStats.map(s => s.avgUnc).sort(d3.ascending);
+  const shapQ = [d3.quantile(shapSorted, 1/3), d3.quantile(shapSorted, 2/3)];
+  const uncQ  = [d3.quantile(uncSorted,  1/3), d3.quantile(uncSorted,  2/3)];
+
+  pointStats.forEach(ps => {
+    ps.shapBin = ps.avgShap < shapQ[0] ? 0 : ps.avgShap < shapQ[1] ? 1 : 2;
+    ps.uncBin  = ps.avgUnc  < uncQ[0]  ? 0 : ps.avgUnc  < uncQ[1]  ? 1 : 2;
+    ps.color   = BIVARIATE[ps.shapBin][ps.uncBin];
+  });
+
+  // Init map once
+  if (!leafletMap) {
+    leafletMap = L.map('map', { zoomControl: true, attributionControl: true });
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '© <a href="https://www.openstreetmap.org/">OpenStreetMap</a> © <a href="https://carto.com/">CARTO</a>',
+      subdomains: 'abcd', maxZoom: 19,
+    }).addTo(leafletMap);
+
+    // Hide hover radar while panning; re-render focus radars after move
+    leafletMap.on('movestart zoomstart', () => {
+      if (!focusCircle) {
+        document.getElementById('radar-svg').style.display = 'none';
+      } else {
+        document.getElementById('radar-svg').style.display = 'none';
+      }
+    });
+    leafletMap.on('moveend zoomend', () => {
+      if (focusCircle) {
+        focusCircle.setRadius(pxToMeters(focusPxRadius, focusCenter));
+        renderFocusRadars();
+      }
+    });
+
+    // Regular click anywhere → dismiss focus circle
+    leafletMap.on('click', () => { if (focusCircle) clearFocusCircle(); });
+
+    // Alt released or Escape → dismiss focus circle
+    document.addEventListener('keyup', e => {
+      if ((e.key === 'Alt' || e.key === 'Escape') && focusCircle) clearFocusCircle();
+    });
+
+    // (Scroll is no longer used to resize focus circle — size is set by K-th nearest point)
+  }
+
+  // Fit bounds
+  const lats = testPoints.map(p => p.lat);
+  const lons = testPoints.map(p => p.lon);
+  const latMin = data.meta.lat_min ?? d3.min(lats);
+  const latMax = data.meta.lat_max ?? d3.max(lats);
+  const lonMin = data.meta.lon_min ?? d3.min(lons);
+  const lonMax = data.meta.lon_max ?? d3.max(lons);
+  leafletMap.fitBounds([[latMin, lonMin], [latMax, lonMax]], { padding: [40, 40] });
+
+  renderMarkers();
+}
+
+// ── Render markers ───────────────────────────────────────
+function renderMarkers() {
+  markers.forEach(m => m.remove());
+  markers = [];
+
+  pointStats.forEach(ps => {
+    const p = ps.point;
+    const marker = L.circleMarker([p.lat, p.lon], {
+      radius: 5,
+      fillColor: ps.color,
+      color: 'rgba(30,41,59,0.5)',
+      weight: 0.6,
+      opacity: 1,
+      fillOpacity: 0.88,
+    }).addTo(leafletMap);
+
+    marker.on('mouseover', e => {
+      clearTimeout(focusClearTimer);
+      if (e.originalEvent && e.originalEvent.altKey) {
+        // Alt+hover → focus circle centered on this point
+        placeFocusCircle(L.latLng(p.lat, p.lon));
+      } else {
+        // Plain hover → single radar (clear focus if it was active)
+        if (focusCircle) clearFocusCircle();
+        showRadar(ps);
+      }
+    });
+    marker.on('mouseout', () => {
+      if (focusCircle) {
+        // Brief delay so moving to an adjacent marker doesn't flicker
+        focusClearTimer = setTimeout(clearFocusCircle, 200);
+      } else {
+        hideRadar();
+      }
+    });
+    markers.push(marker);
+  });
+}
+
+// ── Radar: hide (hover mode) ──────────────────────────────
+function hideRadar() {
+  if (focusCircle) return; // don't clear focus radars
+  document.getElementById('radar-svg').style.display = 'none';
+}
+
+// ── Radar: show single hover radar ───────────────────────
+function showRadar(ps) {
+  if (focusCircle) return; // hover disabled during focus mode
+  const p   = ps.point;
+  const svg = document.getElementById('radar-svg');
+  const con = leafletMap.getContainer();
+  const mapW = con.offsetWidth;
+  const mapH = con.offsetHeight;
+
+  R_CHART  = 115;
+  R_PAD    = 72;
+  R_BOX    = R_CHART * 2 + R_PAD * 2;
+  CONN_GAP = Math.round(Math.min(mapW * 0.08, 120));
+
+  const px = leafletMap.latLngToContainerPoint([p.lat, p.lon]);
+
+  // Count map points overlapping a candidate radar box (cx,cy) with size R_BOX×R_BOX
+  const countOverlap = (cx, cy) => {
+    const hw = R_BOX / 2, hh = R_BOX / 2;
+    return pointStats.filter(ps => {
+      const q = leafletMap.latLngToContainerPoint(L.latLng(ps.point.lat, ps.point.lon));
+      return q.x >= cx - hw && q.x <= cx + hw && q.y >= cy - hh && q.y <= cy + hh;
+    }).length;
+  };
+
+  // Generate candidates: both sides × vertical offsets
+  const vOffsets = [0, -80, 80, -160, 160];
+  const candidates = [];
+  for (const s of ['right', 'left']) {
+    const cx0 = s === 'right'
+      ? Math.min(px.x + CONN_GAP + R_BOX / 2, mapW - R_BOX / 2 - 8)
+      : Math.max(px.x - CONN_GAP - R_BOX / 2, R_BOX / 2 + 8);
+    for (const dy of vOffsets) {
+      const cy0 = Math.max(R_BOX / 2 + 6, Math.min(mapH - R_BOX / 2 - 6, px.y + dy));
+      candidates.push({ side: s, cx: cx0, cy: cy0, score: countOverlap(cx0, cy0) });
+    }
+  }
+  // Pick candidate with fewest overlapping points; break ties by preferring more space
+  candidates.sort((a, b) => a.score - b.score || Math.abs(a.cy - px.y) - Math.abs(b.cy - px.y));
+  const best = candidates[0];
+  const side   = best.side;
+  const radarCx = best.cx;
+  const radarCy = best.cy;
+
+  const anchorX = side === 'right' ? radarCx - R_BOX / 2 : radarCx + R_BOX / 2;
+  const anchorY = radarCy;
+  const stubX   = side === 'right'
+    ? px.x + Math.abs(anchorX - px.x) * 0.55
+    : px.x - Math.abs(px.x - anchorX) * 0.55;
+
+  const ns = 'http://www.w3.org/2000/svg';
+  svg.innerHTML = '';
+  svg.setAttribute('viewBox', `0 0 ${mapW} ${mapH}`);
+  svg.setAttribute('width',  mapW);
+  svg.setAttribute('height', mapH);
+
+  const defs = document.createElementNS(ns, 'defs');
+  defs.innerHTML = `
+    <filter id="dshadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="rgba(0,0,0,0.15)"/>
+    </filter>`;
+  svg.appendChild(defs);
+
+  // Elbow connector
+  const conn = document.createElementNS(ns, 'polyline');
+  conn.setAttribute('points', `${px.x},${px.y} ${stubX},${px.y} ${anchorX},${anchorY}`);
+  conn.setAttribute('stroke', '#1e293b');
+  conn.setAttribute('stroke-width', '2.5');
+  conn.setAttribute('stroke-dasharray', '6,3');
+  conn.setAttribute('fill', 'none');
+  conn.setAttribute('stroke-linecap', 'round');
+  conn.setAttribute('opacity', '0.95');
+  svg.appendChild(conn);
+
+  // Marker dot
+  const dot = document.createElementNS(ns, 'circle');
+  dot.setAttribute('cx', px.x);
+  dot.setAttribute('cy', px.y);
+  dot.setAttribute('r',  4);
+  dot.setAttribute('fill', ps.color);
+  dot.setAttribute('stroke', '#1e293b');
+  dot.setAttribute('stroke-width', '1.2');
+  svg.appendChild(dot);
+
+  // Radar group
+  const g = document.createElementNS(ns, 'g');
+  g.setAttribute('transform', `translate(${radarCx.toFixed(1)},${radarCy.toFixed(1)})`);
+  drawRadar(g, ns, ps);
+  svg.appendChild(g);
+  svg.style.display = 'block';
+}
+
+// ── Draw full radar chart inside group ────────────────────
+function drawRadar(g, ns, ps) {
+  const p      = ps.point;
+  const feats  = data.features;
+  const labels = data.feature_labels || {};
+  const n      = feats.length;
+
+  const shapVals   = feats.map(f => p.features[f].shap);
+  const hasUncBand = feats.every(f => p.features[f].lower_bound != null && p.features[f].upper_bound != null);
+  const lowerVals  = hasUncBand
+    ? feats.map(f => p.features[f].lower_bound)
+    : feats.map(f => p.features[f].shap - p.features[f].geo_uncertainty);
+  const upperVals  = hasUncBand
+    ? feats.map(f => p.features[f].upper_bound)
+    : feats.map(f => p.features[f].shap + p.features[f].geo_uncertainty);
+
+  const allAbsVals = [...shapVals, ...lowerVals, ...upperVals].map(Math.abs);
+  const absMax = Math.max(...allAbsVals) * 1.05 || 1;
+  const valToR = v => Math.max(0, ((v + absMax) / (2 * absMax)) * R_CHART);
+  const angle  = i => (i / n) * 2 * Math.PI - Math.PI / 2;
+  const polar  = (r, a) => ({ x: r * Math.cos(a), y: r * Math.sin(a) });
+
+  // Grid rings
+  [0.25, 0.5, 0.75, 1.0].forEach(t => {
+    const el = document.createElementNS(ns, 'circle');
+    el.setAttribute('cx', 0); el.setAttribute('cy', 0);
+    el.setAttribute('r', (t * R_CHART).toFixed(1));
+    el.setAttribute('fill', 'none');
+    el.setAttribute('stroke', t === 1.0 ? '#94a3b8' : '#e2e8f0');
+    el.setAttribute('stroke-width', t === 1.0 ? '1.2' : '0.8');
+    g.appendChild(el);
+  });
+
+  // Zero-reference (orange dashed)
+  const zeroEl = document.createElementNS(ns, 'circle');
+  zeroEl.setAttribute('cx', 0); zeroEl.setAttribute('cy', 0);
+  zeroEl.setAttribute('r', valToR(0).toFixed(1));
+  zeroEl.setAttribute('fill', 'none');
+  zeroEl.setAttribute('stroke', '#f59e0b');
+  zeroEl.setAttribute('stroke-width', '1.4');
+  zeroEl.setAttribute('stroke-dasharray', '4,3');
+  g.appendChild(zeroEl);
+
+  // Axis lines
+  feats.forEach((_, i) => {
+    const end = polar(R_CHART, angle(i));
+    const line = document.createElementNS(ns, 'line');
+    line.setAttribute('x1', 0); line.setAttribute('y1', 0);
+    line.setAttribute('x2', end.x.toFixed(1)); line.setAttribute('y2', end.y.toFixed(1));
+    line.setAttribute('stroke', '#cbd5e1');
+    line.setAttribute('stroke-width', '0.8');
+    g.appendChild(line);
+  });
+
+  // Uncertainty band (evenodd)
+  const upperPts  = feats.map((f, i) => polar(valToR(upperVals[i]), angle(i)));
+  const lowerPts  = feats.map((f, i) => polar(Math.max(0, valToR(lowerVals[i])), angle(i)));
+  const ptStr     = pts => pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+  const upperPath = upperPts.map((p, i) => `${i===0?'M':'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') + ' Z';
+  const lowerPath = [...lowerPts].reverse().map((p, i) => `${i===0?'M':'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') + ' Z';
+
+  const band = document.createElementNS(ns, 'path');
+  band.setAttribute('d', `${upperPath} ${lowerPath}`);
+  band.setAttribute('fill', 'rgba(147,197,253,0.45)');
+  band.setAttribute('fill-rule', 'evenodd');
+  band.setAttribute('stroke', 'none');
+  g.appendChild(band);
+
+  // SHAP polygon
+  const shapPts = feats.map((f, i) => polar(valToR(shapVals[i]), angle(i)));
+  const shapPoly = document.createElementNS(ns, 'polygon');
+  shapPoly.setAttribute('points', ptStr(shapPts));
+  shapPoly.setAttribute('fill', 'none');
+  shapPoly.setAttribute('stroke', '#2563eb');
+  shapPoly.setAttribute('stroke-width', '1.8');
+  shapPoly.setAttribute('stroke-linejoin', 'round');
+  g.appendChild(shapPoly);
+
+  shapPts.forEach(pt => {
+    const dot = document.createElementNS(ns, 'circle');
+    dot.setAttribute('cx', pt.x.toFixed(1));
+    dot.setAttribute('cy', pt.y.toFixed(1));
+    dot.setAttribute('r',  '2.2');
+    dot.setAttribute('fill', '#2563eb');
+    dot.setAttribute('stroke', 'white');
+    dot.setAttribute('stroke-width', '0.8');
+    g.appendChild(dot);
+  });
+
+  // Feature labels
+  const LABEL_R = R_CHART + 18;
+  feats.forEach((f, i) => {
+    const a    = angle(i);
+    const pos  = polar(LABEL_R, a);
+    const cosA = Math.cos(a);
+    const sinA = Math.sin(a);
+    const raw  = labels[f] || f;
+    const short = raw.length > 13 ? raw.slice(0, 12) + '…' : raw;
+
+    const text = document.createElementNS(ns, 'text');
+    text.setAttribute('x', pos.x.toFixed(1));
+    text.setAttribute('y', pos.y.toFixed(1));
+    text.setAttribute('font-size',   '9.5');
+    text.setAttribute('font-family', 'Inter, sans-serif');
+    text.setAttribute('fill',        '#1e293b');
+    text.setAttribute('font-weight', '600');
+    text.setAttribute('stroke',      'white');
+    text.setAttribute('stroke-width','3');
+    text.setAttribute('stroke-linejoin', 'round');
+    text.setAttribute('paint-order', 'stroke');
+    if      (cosA >  0.15) text.setAttribute('text-anchor', 'start');
+    else if (cosA < -0.15) text.setAttribute('text-anchor', 'end');
+    else                   text.setAttribute('text-anchor', 'middle');
+    if      (sinA >  0.2) text.setAttribute('dominant-baseline', 'hanging');
+    else if (sinA < -0.2) text.setAttribute('dominant-baseline', 'auto');
+    else                  text.setAttribute('dominant-baseline', 'middle');
+    text.textContent = short;
+    g.appendChild(text);
+  });
+
+  // Scale labels
+  const scaleVals = [absMax * 0.5, 0, -absMax * 0.5];
+  scaleVals.forEach(v => {
+    const r    = valToR(v);
+    const text = document.createElementNS(ns, 'text');
+    text.setAttribute('x',  '5');
+    text.setAttribute('y',  (-r).toFixed(1));
+    text.setAttribute('font-size',   '9');
+    text.setAttribute('font-family', 'Inter, sans-serif');
+    text.setAttribute('fill',        '#475569');
+    text.setAttribute('dominant-baseline', 'middle');
+    text.setAttribute('stroke',      'white');
+    text.setAttribute('stroke-width','2.5');
+    text.setAttribute('paint-order', 'stroke');
+    text.textContent = v.toFixed(1);
+    g.appendChild(text);
+  });
+
+  // Title: y-value
+  const yField = data.meta.y_field || (currentDS && currentDS.yField) || 'price';
+  const yVal   = p[yField];
+  const yStr   = yVal != null ? fmtY(yVal) : '—';
+
+  [['white','4',null], ['#0f172a','0','#0f172a']].forEach(([stroke, sw, fill]) => {
+    const t = document.createElementNS(ns, 'text');
+    t.setAttribute('x', '0');
+    t.setAttribute('y', (-R_CHART - 26).toFixed(1));
+    t.setAttribute('font-size',   '15');
+    t.setAttribute('font-family', 'Inter, sans-serif');
+    t.setAttribute('font-weight', '700');
+    t.setAttribute('text-anchor', 'middle');
+    t.setAttribute('dominant-baseline', 'middle');
+    t.setAttribute('stroke', stroke);
+    t.setAttribute('stroke-width', sw);
+    t.setAttribute('stroke-linejoin', 'round');
+    if (fill) t.setAttribute('fill', fill); else t.setAttribute('fill', 'none');
+    t.textContent = yStr;
+    g.appendChild(t);
+  });
+
+  // Subtitle
+  const subText = `Avg|SHAP| ${ps.avgShap.toFixed(1)}  ·  Avg Unc ±${ps.avgUnc.toFixed(1)}`;
+  [['white','3',null], ['#334155','0','#334155']].forEach(([stroke, sw, fill]) => {
+    const t = document.createElementNS(ns, 'text');
+    t.setAttribute('x', '0');
+    t.setAttribute('y', (-R_CHART - 12).toFixed(1));
+    t.setAttribute('font-size',   '10');
+    t.setAttribute('font-family', 'Inter, sans-serif');
+    t.setAttribute('text-anchor', 'middle');
+    t.setAttribute('dominant-baseline', 'middle');
+    t.setAttribute('stroke', stroke);
+    t.setAttribute('stroke-width', sw);
+    if (fill) t.setAttribute('fill', fill); else t.setAttribute('fill', 'none');
+    t.textContent = subText;
+    g.appendChild(t);
+  });
+}
+
+// ── Focus circle: clear ───────────────────────────────────
+function clearFocusCircle() {
+  if (focusCircle) {
+    focusCircle.remove();
+    focusCircle = null;
+    focusCenter = null;
+    leafletMap && leafletMap.scrollWheelZoom.enable();
+  }
+  const svg = document.getElementById('radar-svg');
+  if (svg) { svg.style.display = 'none'; svg.innerHTML = ''; }
+  document.getElementById('ip-focus-hint').style.display = 'none';
+}
+
+// ── Focus circle: place / move ────────────────────────────
+function placeFocusCircle(latlng) {
+  focusCenter = latlng;
+  if (!focusCircle) {
+    focusCircle = L.circle(latlng, {
+      radius:      1,  // placeholder; renderFocusRadars sets real radius from K-th point
+      color:       '#3b82f6',
+      weight:      2,
+      fillColor:   '#3b82f6',
+      fillOpacity: 0.05,
+      dashArray:   '6,4',
+      interactive: false,
+    }).addTo(leafletMap);
+    leafletMap.scrollWheelZoom.disable(); // scroll now controls radius
+  } else {
+    focusCircle.setLatLng(latlng);
+  }
+  document.getElementById('ip-focus-hint').style.display = 'block';
+  renderFocusRadars();
+}
+
+// ── Get K nearest points (always K closest, circle is visual only) ──────────
+function getPointsInCircle() {
+  if (!focusCenter) return [];
+  return pointStats
+    .slice()
+    .sort((a, b) =>
+      focusCenter.distanceTo(L.latLng(a.point.lat, a.point.lon)) -
+      focusCenter.distanceTo(L.latLng(b.point.lat, b.point.lon))
+    )
+    .slice(0, FOCUS_K);
+}
+
+// ── Render all focus mini radars ──────────────────────────
+function renderFocusRadars() {
+  if (!focusCenter || !focusCircle) return;
+  const inCircle = getPointsInCircle();
+
+  const svg  = document.getElementById('radar-svg');
+  const con  = leafletMap.getContainer();
+  const mapW = con.offsetWidth;
+  const mapH = con.offsetHeight;
+  const ns   = 'http://www.w3.org/2000/svg';
+
+  svg.innerHTML = '';
+  svg.setAttribute('viewBox', `0 0 ${mapW} ${mapH}`);
+  svg.setAttribute('width',  mapW);
+  svg.setAttribute('height', mapH);
+  svg.style.display = 'block';
+
+  if (inCircle.length === 0) return;
+
+  // Resize circle to exactly enclose the K-th nearest point
+  const kthPt = inCircle[inCircle.length - 1].point;
+  const kthDist = focusCenter.distanceTo(L.latLng(kthPt.lat, kthPt.lon));
+  focusCircle.setRadius(kthDist * 1.08);  // slight padding so K-th point sits inside edge
+
+  // Pixel center of focus point
+  const cx0 = leafletMap.latLngToContainerPoint(focusCenter);
+  // pxRadius = farthest pixel distance among the K selected points (so radars sit just outside)
+  const pxRadius = Math.max(30, ...inCircle.map(ps => {
+    const ptPx = leafletMap.latLngToContainerPoint(L.latLng(ps.point.lat, ps.point.lon));
+    return Math.hypot(ptPx.x - cx0.x, ptPx.y - cx0.y);
+  }));
+
+  // ── Angular spreading: guaranteed no overlap ──────────────
+  // min center-to-center distance: disk diameter + label height (label sits ~18px above disk top)
+  const minSep = (R_MINI + 5) * 2 + 80;  // covers disk + feature labels extending outward
+  const n = inCircle.length;
+
+  // Ensure placeDist is large enough for all n radars to fit on the ring
+  // (circumradius of regular n-gon with side = minSep)
+  const minPlaceDist = n > 1 ? minSep / (2 * Math.sin(Math.PI / n)) : 0;
+  const placeDist = Math.max(pxRadius + MINI_GAP + R_MINI, minPlaceDist);
+
+  // Compute initial angle toward each data point from circle center
+  const entries = inCircle.map(ps => {
+    const ptPx = leafletMap.latLngToContainerPoint([ps.point.lat, ps.point.lon]);
+    const dx = ptPx.x - cx0.x, dy = ptPx.y - cx0.y;
+    let ang = Math.atan2(dy || -1, dx);
+    if (ang < 0) ang += 2 * Math.PI;  // normalize to [0, 2π)
+    return { ang, ps, ptPx };
+  });
+  entries.sort((a, b) => a.ang - b.ang);
+
+  // Minimum angular gap to keep radars minSep apart on the ring
+  const minAngGap = 2 * Math.asin(Math.min(0.9999, minSep / (2 * placeDist)));
+
+  // Find the largest circular gap → start ordering after it (avoids wrap-around issues)
+  let startIdx = 0, maxGap = 0;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const gap = ((entries[j].ang - entries[i].ang) + 2 * Math.PI) % (2 * Math.PI);
+    if (gap > maxGap) { maxGap = gap; startIdx = j; }
+  }
+  const ord = [...entries.slice(startIdx), ...entries.slice(0, startIdx)];
+  // Unwrap angles so the sequence is strictly increasing
+  for (let i = 1; i < n; i++) {
+    while (ord[i].ang <= ord[i - 1].ang) ord[i].ang += 2 * Math.PI;
+  }
+
+  // Iteratively push adjacent angles apart (linear — no wrap needed after reordering)
+  for (let iter = 0; iter < 300; iter++) {
+    let moved = false;
+    for (let i = 0; i < n - 1; i++) {
+      const diff = ord[i + 1].ang - ord[i].ang;
+      if (diff < minAngGap) {
+        const push = (minAngGap - diff) * 0.5;
+        ord[i].ang     -= push;
+        ord[i + 1].ang += push;
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+
+  // Convert final angles → Cartesian positions, clamp to viewport
+  const PAD = R_MINI + 30;  // extra room for feature labels outside disk
+  const positions = ord.map(e => {
+    let x = cx0.x + Math.cos(e.ang) * placeDist;
+    let y = cx0.y + Math.sin(e.ang) * placeDist;
+    x = Math.max(PAD, Math.min(mapW - PAD, x));
+    y = Math.max(PAD, Math.min(mapH - PAD, y));
+    return { x, y, ps: e.ps, ptPx: e.ptPx };
+  });
+
+  // ── Final Cartesian repulsion pass ────────────────────────
+  // Viewport clamping above can pull radars back together; fix any residual overlaps
+  for (let iter = 0; iter < 80; iter++) {
+    let moved = false;
+    for (let i = 0; i < positions.length; i++) {
+      for (let j = i + 1; j < positions.length; j++) {
+        const dx = positions[j].x - positions[i].x;
+        const dy = positions[j].y - positions[i].y;
+        const d  = Math.hypot(dx, dy);
+        if (d < minSep && d > 0.01) {
+          const push = (minSep - d) * 0.6;
+          const nx = dx / d, ny = dy / d;
+          positions[i].x = Math.max(PAD, Math.min(mapW - PAD, positions[i].x - nx * push));
+          positions[i].y = Math.max(PAD, Math.min(mapH - PAD, positions[i].y - ny * push));
+          positions[j].x = Math.max(PAD, Math.min(mapW - PAD, positions[j].x + nx * push));
+          positions[j].y = Math.max(PAD, Math.min(mapH - PAD, positions[j].y + ny * push));
+          moved = true;
+        }
+      }
+    }
+    if (!moved) break;
+  }
+
+  // ── Draw elbow connector lines (horizontal stub → radar center) ──
+  const STUB = 32;  // horizontal stub length in px
+  positions.forEach(pos => {
+    const stubX = pos.ptPx.x + (pos.x >= pos.ptPx.x ? STUB : -STUB);
+    const conn = document.createElementNS(ns, 'polyline');
+    conn.setAttribute('points',
+      `${pos.ptPx.x.toFixed(1)},${pos.ptPx.y.toFixed(1)} ` +
+      `${stubX.toFixed(1)},${pos.ptPx.y.toFixed(1)} ` +
+      `${pos.x.toFixed(1)},${pos.y.toFixed(1)}`);
+    conn.setAttribute('stroke', '#1e293b');
+    conn.setAttribute('stroke-width', '2');
+    conn.setAttribute('stroke-dasharray', '5,3');
+    conn.setAttribute('fill', 'none');
+    conn.setAttribute('stroke-linecap', 'round');
+    conn.setAttribute('stroke-linejoin', 'round');
+    conn.setAttribute('opacity', '0.9');
+    svg.appendChild(conn);
+  });
+
+  // ── Point highlight dots ──
+  positions.forEach(pos => {
+    const dot = document.createElementNS(ns, 'circle');
+    dot.setAttribute('cx', pos.ptPx.x.toFixed(1));
+    dot.setAttribute('cy', pos.ptPx.y.toFixed(1));
+    dot.setAttribute('r',  '5.5');
+    dot.setAttribute('fill', pos.ps.color);
+    dot.setAttribute('stroke', 'white');
+    dot.setAttribute('stroke-width', '1.5');
+    svg.appendChild(dot);
+  });
+
+  // ── Draw mini radars on top ──
+  positions.forEach(pos => {
+    const g = document.createElementNS(ns, 'g');
+    g.setAttribute('transform', `translate(${pos.x.toFixed(1)},${pos.y.toFixed(1)})`);
+    drawMiniRadar(g, ns, pos.ps);
+    svg.appendChild(g);
+  });
+}
+
+// ── Draw mini radar (compact, no axis labels) ─────────────
+function drawMiniRadar(g, ns, ps) {
+  const p     = ps.point;
+  const feats = data.features;
+  const n     = feats.length;
+  const RM    = R_MINI;
+
+  const shapVals   = feats.map(f => p.features[f].shap);
+  const hasUncBand = feats.every(f => p.features[f].lower_bound != null && p.features[f].upper_bound != null);
+  const lowerVals  = hasUncBand
+    ? feats.map(f => p.features[f].lower_bound)
+    : feats.map(f => p.features[f].shap - p.features[f].geo_uncertainty);
+  const upperVals  = hasUncBand
+    ? feats.map(f => p.features[f].upper_bound)
+    : feats.map(f => p.features[f].shap + p.features[f].geo_uncertainty);
+
+  const allAbsVals = [...shapVals, ...lowerVals, ...upperVals].map(Math.abs);
+  const absMax = Math.max(...allAbsVals) * 1.05 || 1;
+  const valToR = v => Math.max(0, ((v + absMax) / (2 * absMax)) * RM);
+  const angle  = i => (i / n) * 2 * Math.PI - Math.PI / 2;
+  const polar  = (r, a) => ({ x: r * Math.cos(a), y: r * Math.sin(a) });
+
+  // Frosted glass background disk
+  const bg = document.createElementNS(ns, 'circle');
+  bg.setAttribute('cx', 0); bg.setAttribute('cy', 0);
+  bg.setAttribute('r', (RM + 8).toFixed(1));
+  bg.setAttribute('fill', 'rgba(255,255,255,0.82)');
+  bg.setAttribute('stroke', ps.color);
+  bg.setAttribute('stroke-width', '2');
+  g.appendChild(bg);
+
+  // Grid rings
+  [0.5, 1.0].forEach(t => {
+    const el = document.createElementNS(ns, 'circle');
+    el.setAttribute('cx', 0); el.setAttribute('cy', 0);
+    el.setAttribute('r', (t * RM).toFixed(1));
+    el.setAttribute('fill', 'none');
+    el.setAttribute('stroke', t === 1.0 ? '#94a3b8' : '#e2e8f0');
+    el.setAttribute('stroke-width', '0.7');
+    g.appendChild(el);
+  });
+
+  // Zero-reference (orange dashed)
+  const zeroEl = document.createElementNS(ns, 'circle');
+  zeroEl.setAttribute('cx', 0); zeroEl.setAttribute('cy', 0);
+  zeroEl.setAttribute('r', valToR(0).toFixed(1));
+  zeroEl.setAttribute('fill', 'none');
+  zeroEl.setAttribute('stroke', '#f59e0b');
+  zeroEl.setAttribute('stroke-width', '1');
+  zeroEl.setAttribute('stroke-dasharray', '3,2');
+  g.appendChild(zeroEl);
+
+  // Axis lines
+  feats.forEach((_, i) => {
+    const end = polar(RM, angle(i));
+    const ln  = document.createElementNS(ns, 'line');
+    ln.setAttribute('x1', 0); ln.setAttribute('y1', 0);
+    ln.setAttribute('x2', end.x.toFixed(1)); ln.setAttribute('y2', end.y.toFixed(1));
+    ln.setAttribute('stroke', '#cbd5e1');
+    ln.setAttribute('stroke-width', '0.5');
+    g.appendChild(ln);
+  });
+
+  // Uncertainty band
+  const upperPts  = feats.map((f, i) => polar(valToR(upperVals[i]), angle(i)));
+  const lowerPts  = feats.map((f, i) => polar(Math.max(0, valToR(lowerVals[i])), angle(i)));
+  const upperPath = upperPts.map((p, i) => `${i===0?'M':'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') + ' Z';
+  const lowerPath = [...lowerPts].reverse().map((p, i) => `${i===0?'M':'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') + ' Z';
+  const band = document.createElementNS(ns, 'path');
+  band.setAttribute('d', `${upperPath} ${lowerPath}`);
+  band.setAttribute('fill', 'rgba(147,197,253,0.50)');
+  band.setAttribute('fill-rule', 'evenodd');
+  band.setAttribute('stroke', 'none');
+  g.appendChild(band);
+
+  // SHAP polygon
+  const shapPts = feats.map((f, i) => polar(valToR(shapVals[i]), angle(i)));
+  const ptStr   = pts => pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+  const shapPoly = document.createElementNS(ns, 'polygon');
+  shapPoly.setAttribute('points', ptStr(shapPts));
+  shapPoly.setAttribute('fill', 'none');
+  shapPoly.setAttribute('stroke', '#2563eb');
+  shapPoly.setAttribute('stroke-width', '1.5');
+  shapPoly.setAttribute('stroke-linejoin', 'round');
+  g.appendChild(shapPoly);
+
+  // Helper: halo text
+  const mkSvgText = (txt, x, y, size, weight, color, anchor) => {
+    const t = document.createElementNS(ns, 'text');
+    t.setAttribute('x', x.toFixed(1));
+    t.setAttribute('y', y.toFixed(1));
+    t.setAttribute('font-size', String(size));
+    t.setAttribute('font-family', 'Inter, sans-serif');
+    t.setAttribute('font-weight', weight);
+    t.setAttribute('fill', color);
+    t.setAttribute('text-anchor', anchor || 'middle');
+    t.setAttribute('dominant-baseline', 'middle');
+    t.setAttribute('stroke', 'white');
+    t.setAttribute('stroke-width', '2.5');
+    t.setAttribute('paint-order', 'stroke');
+    t.textContent = txt;
+    g.appendChild(t);
+  };
+
+  // Feature labels around perimeter
+  const labels = data.feature_labels || {};
+  const LABEL_R = RM + 15;
+  feats.forEach((f, i) => {
+    const a    = angle(i);
+    const lpos = polar(LABEL_R, a);
+    const cosA = Math.cos(a);
+    const anchor = Math.abs(cosA) < 0.3 ? 'middle' : (cosA > 0 ? 'start' : 'end');
+    const raw  = labels[f] || f;
+    // Abbreviate to 10 chars max
+    const lbl  = raw.length > 11 ? raw.slice(0, 10) + '…' : raw;
+    mkSvgText(lbl, lpos.x, lpos.y, 7.5, '500', '#475569', anchor);
+  });
+
+  // SHAP value at each vertex
+  feats.forEach((f, i) => {
+    const a    = angle(i);
+    const vr   = valToR(shapVals[i]);
+    const vpos = polar(vr + 9, a);  // slightly outside the vertex dot
+    const val  = shapVals[i];
+    const txt  = (val >= 0 ? '+' : '') + val.toFixed(1);
+    mkSvgText(txt, vpos.x, vpos.y, 7, '600', val >= 0 ? '#1d4ed8' : '#be123c', 'middle');
+  });
+
+  // Label above the disk: field name (small) + value (large)
+  const yField = data.meta.y_field || (currentDS && currentDS.yField) || 'price';
+  const yVal   = p[yField];
+  if (yVal != null) {
+    const mkText = (txt, y, size, weight, color) => {
+      const t = document.createElementNS(ns, 'text');
+      t.setAttribute('x', '0');
+      t.setAttribute('y', y.toFixed(1));
+      t.setAttribute('font-size', String(size));
+      t.setAttribute('font-family', 'Inter, sans-serif');
+      t.setAttribute('font-weight', weight);
+      t.setAttribute('fill', color);
+      t.setAttribute('text-anchor', 'middle');
+      t.setAttribute('dominant-baseline', 'auto');
+      t.setAttribute('stroke', 'white');
+      t.setAttribute('stroke-width', '2.5');
+      t.setAttribute('paint-order', 'stroke');
+      t.textContent = txt;
+      g.appendChild(t);
+    };
+    // Field label (e.g. "House Price") above value
+    mkText(currentDS ? currentDS.yLabel : yField, -RM - 34, 8.5, '500', '#64748b');
+    // Formatted value (e.g. "$450k") closer to disk
+    mkText(fmtY(yVal), -RM - 17, 13, '700', '#0f172a');
+  }
+}
+
+// ── Formatting helpers ───────────────────────────────────
+function fmtY(v) {
+  if (!currentDS) return String(v);
+  const unit = currentDS.yUnit;
+  if (unit === '$') {
+    const d = v * 10000;
+    return d >= 1e6 ? `$${(d/1e6).toFixed(2)}M` : `$${Math.round(d/1000)}k`;
+  }
+  if (unit === '$raw') {
+    return v >= 1e6 ? `$${(v/1e6).toFixed(1)}M` : `$${Math.round(v/1000)}k`;
+  }
+  if (unit === '%') return `${Number(v).toFixed(1)}%`;
+  return Number(v).toFixed(2);
+}
+
+// ── Init ─────────────────────────────────────────────────
+buildLegend();
+
+const dsSel = document.getElementById('ds-select');
+DATASETS.forEach((ds, i) => {
+  const opt = document.createElement('option');
+  opt.value = i; opt.textContent = ds.label;
+  dsSel.appendChild(opt);
+});
+dsSel.addEventListener('change', e => {
+  markers.forEach(m => m.remove());
+  markers = [];
+  loadDataset(DATASETS[+e.target.value]);
+});
+
+loadDataset(DATASETS[0]);
+</script>
+</body>
+</html>
