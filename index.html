@@ -988,7 +988,7 @@
 // ── Dataset registry ───────────────────────────────────────
 const DATASETS = [
   { label: 'Seattle House Price', url: 'data/results.json',          scriptUrl: 'data/results.js',          varName: 'GeoXCPData',          yField: 'price',  yLabel: 'House Price',   yUnit: '$',  pointLabel: 'houses',   markerMinR: 4, markerMaxR: 18 },
-  { label: 'NYC Median Income',   url: 'data/results_nyc.json',      scriptUrl: 'data/results_nyc.js',      varName: 'GeoXCPDataNYC',       yField: 'income', yLabel: 'Median Income', yUnit: '$',  pointLabel: 'tracts',   markerMinR: 2, markerMaxR: 7  },
+  { label: 'NYC Median Income',   url: 'data/results_nyc.json',      scriptUrl: 'data/results_nyc.js',      varName: 'GeoXCPDataNYC',       yField: 'income', yLabel: 'Median Income', yUnit: '$raw', pointLabel: 'tracts',   markerMinR: 2, markerMaxR: 7  },
   { label: 'US Politics Voting',  url: 'data/results_politics.json', scriptUrl: 'data/results_politics.js', varName: 'GeoXCPDataPolitics',  yField: 'y_val',  yLabel: 'Dem. Vote %',   yUnit: '%',  pointLabel: 'counties', markerMinR: 3, markerMaxR: 12 },
 ];
 
@@ -1543,13 +1543,14 @@ const App = (() => {
 
     const featureData = data.features.map((f, i) => {
       const fd = point.features[f];
+      const lbl = labels[f] || f;
       return {
         feature: f,
-        label: `${labels[f] || f} = ${fmtVal(fd.value, f)}`,
+        label: fd.value !== undefined ? `${lbl} = ${fmtVal(fd.value, f)}` : lbl,
         shap: fd.shap,
         geo_uncertainty: fd.geo_uncertainty,
         pred: fd.pred,
-        color: FEATURE_COLORS[i]
+        color: FEATURE_COLORS[i % FEATURE_COLORS.length]
       };
     });
 
@@ -1756,6 +1757,12 @@ const App = (() => {
     if (!currentDS) return fmtPrice(v);
     const unit = currentDS.yUnit || (data.meta && data.meta.y_unit) || '$';
     if (unit === '%') return parseFloat(v).toFixed(1) + '%';
+    if (unit === '$raw') {
+      // Raw dollar amounts (e.g. NYC income stored as actual $)
+      if (v >= 1e6) return `$${(v / 1e6).toFixed(1)}M`;
+      if (v >= 1000) return `$${Math.round(v / 1000)}k`;
+      return `$${Math.round(v)}`;
+    }
     return fmtPrice(v);
   }
 
@@ -1767,6 +1774,7 @@ const App = (() => {
   }
 
   function fmtVal(v, feature) {
+    if (v === undefined || v === null) return '—';
     if (feature === 'sqft_living' || feature === 'sqft_lot') return Math.round(v).toLocaleString();
     if (feature === 'waterfront') return v > 0.5 ? 'Yes' : 'No';
     if (feature === 'lon' || feature === 'lat') return v.toFixed(4);
