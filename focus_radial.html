@@ -155,8 +155,8 @@
   <div class="controls" id="controls" style="display:none">
     <div class="ctrl-group">
       <span class="ctrl-label">Radius</span>
-      <input type="range" id="radius-slider" min="200" max="5000" step="50" value="1000">
-      <span class="ctrl-value" id="radius-val">1.0 km</span>
+      <input type="range" id="radius-slider" min="200" max="5000" step="50" value="2000">
+      <span class="ctrl-value" id="radius-val">2.0 km</span>
     </div>
   </div>
 </div>
@@ -197,7 +197,7 @@ const SHORT = {
 // ── state ─────────────────────────────────────────────────
 let data, features, featureLabels;
 let map, circleLayer, centerLatLng;
-let radiusM   = 1000;
+let radiusM   = 2000;
 let currentAgg = null;
 let hoveredIdx = null;   // which feature slice is expanded
 let sortedFeatures = []; // cached sorted feature list
@@ -305,8 +305,8 @@ function init() {
 function placeCircle(latlng) {
   centerLatLng = latlng;
   circleLayer  = L.circle(latlng, {
-    radius: radiusM, color: '#3b5bdb', weight: 1.5,
-    fillColor: '#3b5bdb', fillOpacity: 0.05
+    radius: radiusM, color: '#eb0f6f', weight: 1.5,
+    fillColor: '#eb0f6f', fillOpacity: 0.05
   }).addTo(map);
 }
 
@@ -449,7 +449,7 @@ function redrawRadial() {
   // Focus circle ring
   svg.append('circle')
     .attr('cx', cx).attr('cy', cy).attr('r', rPx)
-    .attr('fill', 'none').attr('stroke', '#3b5bdb')
+    .attr('fill', 'none').attr('stroke', '#eb0f6f')
     .attr('stroke-width', 1.5).attr('opacity', 0.5);
 
   // Reference rings at 25/50/75/100% of MAX_H
@@ -484,7 +484,7 @@ function redrawRadial() {
   slices.append('path')
     .attr('class', 'arc-uncert')
     .attr('d', uncertArc)
-    .attr('fill', '#f59e0b')
+    .attr('fill', '#f48420')
     .attr('opacity', d => hoveredIdx === null ? 0.65 : (d.idx === hoveredIdx ? 0.85 : 0.18))
     .attr('stroke', '#fff').attr('stroke-width', 0.5);
 
@@ -496,15 +496,16 @@ function redrawRadial() {
       const mx = d.midAngle;
       const x  = Math.sin(mx) * r, y = -Math.cos(mx) * r;
       const rot  = mx * 180 / Math.PI;
-      const flip = mx > Math.PI / 2 && mx < 3 * Math.PI / 2;
-      return `translate(${x},${y}) rotate(${flip ? rot + 180 : rot})`;
+      const flip = mx > Math.PI;
+      return `translate(${x},${y}) rotate(${flip ? rot + 90 : rot - 90})`;
     })
-    .attr('text-anchor', d => (d.midAngle > Math.PI / 2 && d.midAngle < 3 * Math.PI / 2) ? 'end' : 'start')
+    .attr('text-anchor', d => d.midAngle > Math.PI ? 'end' : 'start')
     .attr('dy', '0.35em')
-    .attr('font-size', d => hoveredIdx === d.idx ? 11 : 9)
+    .attr('font-size', d => hoveredIdx === d.idx ? 13 : 11)
     .attr('font-weight', d => hoveredIdx === d.idx ? 600 : 400)
     .attr('font-family', 'Inter, sans-serif')
-    .attr('fill', d => hoveredIdx === null ? '#475569' : (d.idx === hoveredIdx ? d.color : '#94a3b8'))
+    .attr('fill', '#6e0f1c')
+    .attr('opacity', d => hoveredIdx === null ? 1 : (d.idx === hoveredIdx ? 1 : 0.3))
     .style('pointer-events', 'none')
     .text(d => SHORT[d.f] || d.f);
 
@@ -524,7 +525,7 @@ function redrawRadial() {
       .attr('transform', `translate(${shapLx},${shapLy}) rotate(${shapFlip ? shapRot + 180 : shapRot})`)
       .style('pointer-events', 'none');
     sg.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
-      .attr('font-size', 10).attr('font-weight', 700).attr('font-family', 'Inter, sans-serif')
+      .attr('font-size', 12).attr('font-weight', 700).attr('font-family', 'Inter, sans-serif')
       .attr('fill', getColor(d.idx))
       .text(fmt$(d.abshap));
 
@@ -583,7 +584,7 @@ function showTooltip(d, event) {
     </div>
     <div class="tt-bar-wrap">
       <div class="tt-bar-label">Geo-uncertainty ±${fmt$(d.uncert)}</div>
-      <div class="tt-uncert-track"><div class="tt-bar-fill" style="width:${uncPct.toFixed(1)}%;background:#d97706"></div></div>
+      <div class="tt-uncert-track"><div class="tt-bar-fill" style="width:${uncPct.toFixed(1)}%;background:#f48420"></div></div>
     </div>
     <div class="tt-footer">${currentAgg.n} tracts · ${(radiusM/1000).toFixed(1)} km · Gaussian weighted</div>`;
 
@@ -611,14 +612,14 @@ function updateRadialLegend() {
   // Section 1: SHAP arcs (left half of each slice)
   html += `<div class="rl-section">
     <div class="rl-section-title">Left arc — Mean |SHAP|</div>`;
-  html += `<div class="rl-row" style="margin-top:4px"><span class="rl-swatch" style="background:#3b5bdb"></span>Mean |SHAP| (arc length)</div>`;
+  html += `<div class="rl-row" style="margin-top:4px"><span class="rl-swatch" style="background:#eb0f6f"></span>Mean |SHAP| (arc length)</div>`;
   html += `</div>`;
 
   // Section 2: Uncertainty arc (right half)
   html += `<hr class="rl-divider">
   <div class="rl-section">
     <div class="rl-section-title">Geo-uncertainty (right arc)</div>
-    <div class="rl-row"><span class="rl-swatch" style="background:#f59e0b"></span>Prediction interval width</div>
+    <div class="rl-row"><span class="rl-swatch" style="background:#f48420"></span>Prediction interval width</div>
   </div>`;
 
   // Section 3: Income dots
@@ -645,7 +646,7 @@ function drawBandLegend(svg, cx, cy, rPx) {}
 
 // ── color ─────────────────────────────────────────────────
 function getColor(i) {
-  return '#3b5bdb';
+  return '#eb0f6f';
 }
 
 // ── legend ─────────────────────────────────────────────────
