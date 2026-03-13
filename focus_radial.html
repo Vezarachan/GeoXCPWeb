@@ -195,6 +195,7 @@ const DATASETS = [
     yField:     'price',
     yLabel:     'House Price',
     yUnit:      '$',
+    yScale:     10000,   // data stored in $10k units
     pointLabel: 'houses',
     radiusMin:  200, radiusMax: 5000, radiusDefault: 2000,
     dotColors:  ['#86efac', '#14532d'],
@@ -303,13 +304,14 @@ function setupData(json, ds) {
   const yLabel = data.meta.y_label || ds.yLabel;
   const yUnit  = data.meta.y_unit  || ds.yUnit;
 
-  // Dynamic value formatter
+  // Dynamic value formatter (apply yScale if data is in sub-unit, e.g. $10k)
+  const yScale = ds.yScale || 1;
   if (yUnit === '%') {
-    fmtY = v => v.toFixed(1) + '%';
+    fmtY = v => (v * yScale).toFixed(1) + '%';
   } else if (yUnit === '$') {
-    fmtY = fmt$;
+    fmtY = v => fmt$(v * yScale);
   } else {
-    fmtY = v => Number(v).toFixed(2);
+    fmtY = v => Number(v * yScale).toFixed(2);
   }
 
   // Init map (first call) or reuse
