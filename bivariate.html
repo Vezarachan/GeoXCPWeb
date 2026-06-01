@@ -148,6 +148,10 @@
 
     /* ═════════════════ MOBILE (≤ 768px) ═════════════════ */
     @media (max-width: 768px) {
+      /* CSS fallback in case touch detection missed the device and Leaflet
+         still added the zoom buttons — they would overlap the ds-select. */
+      .leaflet-control-zoom { display: none !important; }
+
       #ds-select {
         top: 10px; left: 10px;
         padding: 7px 12px;
@@ -336,6 +340,18 @@ function setRadarSizes() {
   R_BOX = R_CHART * 2 + R_PAD * 2;
 }
 function isMobileView() { return window.innerWidth <= 768; }
+
+// Robust touch detection — single-source-of-truth for tap-vs-hover branches.
+// Combines three signals because `pointer: coarse` alone misses some Android
+// browsers and phones with a paired Bluetooth mouse.
+function isTouchDevice() {
+  if (window.matchMedia) {
+    if (window.matchMedia('(pointer: coarse)').matches) return true;
+    if (window.matchMedia('(hover: none)').matches)     return true;
+  }
+  return (navigator.maxTouchPoints || 0) > 0;
+}
+
 // Mobile interaction mode: 'radar' (single point) or 'focus' (top-K nearest)
 let mobileMode = 'radar';
 
@@ -426,7 +442,12 @@ function setup(json, ds) {
 
   // Init map once
   if (!leafletMap) {
-    leafletMap = L.map('map', { zoomControl: true, attributionControl: true });
+    leafletMap = L.map('map', {
+      zoomControl: !isTouchDevice(),   // pinch-to-zoom is enough on touch; frees top-left for ds-select
+      attributionControl: true,
+      tap: true,
+      tapTolerance: 22,                // default 15 — a bit forgiving so small finger wobble still triggers click
+    });
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
       attribution: '© <a href="https://www.openstreetmap.org/">OpenStreetMap</a> © <a href="https://carto.com/">CARTO</a>',
       subdomains: 'abcd', maxZoom: 19,
@@ -478,9 +499,9 @@ function renderMarkers() {
   markers.forEach(m => m.remove());
   markers = [];
 
-  // Slightly larger marker radius on coarse-pointer (touch) devices for tap accuracy
-  const isCoarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
-  const baseR = isCoarse ? 7 : 5;
+  // Slightly larger marker radius on touch devices for tap accuracy
+  const isCoarse = isTouchDevice();
+  const baseR = isCoarse ? 8 : 5;
   pointStats.forEach(ps => {
     const p = ps.point;
     const marker = L.circleMarker([p.lat, p.lon], {
