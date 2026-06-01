@@ -166,15 +166,19 @@
         overflow: hidden;
       }
 
-      /* Mode toggle bar: dock at bottom-center on mobile to free up the top edge
-         (which already has ds-select left + info-panel right). */
+      /* Mode toggle bar: dock on a SECOND ROW below ds-select / info-panel.
+         Placing it at the bottom hides it on iOS Safari where the URL bar
+         overlaps the lower ~80px of the viewport. */
       #mobile-mode-bar {
         display: inline-flex; align-items: center;
-        top: auto;
-        bottom: 36px;
+        top: 52px;
+        bottom: auto;
         left: 50%;
         transform: translateX(-50%);
+        padding: 3px;
       }
+      #mobile-mode-bar button { padding: 5px 12px; font-size: 11px; }
+      #mobile-mode-bar button.clear-btn { padding: 5px 9px; font-size: 12px; }
 
       /* Info panel: compact collapsible, anchored top-right */
       #info-panel {
@@ -302,10 +306,13 @@ const ALT_LABEL = isMac ? '⌥ Option' : 'Alt';
 document.getElementById('ip-alt-key').textContent = ALT_LABEL;
 
 // ── Dataset registry ─────────────────────────────────────
+// markerMinR / markerMaxR — per-dataset point radius at zoom 4 / zoom 16.
+// NYC has ~7700 tracts so dots need to be small to avoid a sea-of-circles
+// look; Seattle has ~2400 houses and tolerates bigger dots.
 const DATASETS = [
-  { label: 'Seattle House Price', url: 'data/results.json',          scriptUrl: 'data/results.js',          varName: 'GeoXCPData',         yField: 'price',  yLabel: 'House Price',   yUnit: '$'    },
-  { label: 'NYC Median Income',   url: 'data/results_nyc.json',      scriptUrl: 'data/results_nyc.js',      varName: 'GeoXCPDataNYC',      yField: 'income', yLabel: 'Median Income', yUnit: '$raw' },
-  { label: 'US Politics Voting',  url: 'data/results_politics.json', scriptUrl: 'data/results_politics.js', varName: 'GeoXCPDataPolitics', yField: 'y_val',  yLabel: 'Dem. Vote %',   yUnit: '%'    },
+  { label: 'Seattle House Price', url: 'data/results.json',          scriptUrl: 'data/results.js',          varName: 'GeoXCPData',         yField: 'price',  yLabel: 'House Price',   yUnit: '$',    markerMinR: 3, markerMaxR: 9 },
+  { label: 'NYC Median Income',   url: 'data/results_nyc.json',      scriptUrl: 'data/results_nyc.js',      varName: 'GeoXCPDataNYC',      yField: 'income', yLabel: 'Median Income', yUnit: '$raw', markerMinR: 1.5, markerMaxR: 5 },
+  { label: 'US Politics Voting',  url: 'data/results_politics.json', scriptUrl: 'data/results_politics.js', varName: 'GeoXCPDataPolitics', yField: 'y_val',  yLabel: 'Dem. Vote %',   yUnit: '%',    markerMinR: 2.5, markerMaxR: 7 },
 ];
 
 // ── Bivariate color scheme (Joshua Stevens · Blue × Purple) ─
@@ -487,24 +494,12 @@ function applySource() {
     map.getSource('points').setData(geojson);
   } else {
     map.addSource('points', { type: 'geojson', data: geojson, promoteId: 'idx' });
-    const isCoarse = isTouchDevice();
     map.addLayer({
       id: 'points-layer',
       type: 'circle',
       source: 'points',
       paint: {
-        // Zoom-interpolated radius. Visible size stays in a sensible
-        // proportion of the map: small dots at low zoom, larger when zoomed in.
-        // Touch devices get a slightly larger size at every zoom level for tap
-        // accuracy. The hit area still extends beyond the painted radius via
-        // MapLibre's tolerance, so taps are reliable even at low zooms.
-        'circle-radius': [
-          'interpolate', ['linear'], ['zoom'],
-          4,  isCoarse ? 3 : 2,
-          8,  isCoarse ? 5 : 3.5,
-          12, isCoarse ? 7 : 5,
-          16, isCoarse ? 10 : 7,
-        ],
+        'circle-radius': radiusExpression(),
         'circle-color': ['get', 'color'],
         'circle-stroke-color': [
           'case',
@@ -520,21 +515,45 @@ function applySource() {
       },
     });
     wirePointEvents();
+    return;
   }
+  // Layer already exists — only the dataset's marker scale needs to change.
+  map.setPaintProperty('points-layer', 'circle-radius', radiusExpression());
+}
+
+// Min / max radius for the current dataset, slightly enlarged on touch
+function currentRadiusRange() {
+  const ds = currentDS || DATASETS[0];
+  const isCoarse = isTouchDevice();
+  // Bump touch radius by ~1.6× for tappability, but keep dense datasets (NYC)
+  // from turning into a blob.
+  const minR = isCoarse ? ds.markerMinR * 1.5 + 0.5 : ds.markerMinR;
+  const maxR = isCoarse ? ds.markerMaxR * 1.4 + 0.5 : ds.markerMaxR;
+  return { minR, maxR };
+}
+
+// MapLibre paint expression: zoom-interpolated radius using the per-dataset range
+function radiusExpression() {
+  const { minR, maxR } = currentRadiusRange();
+  const midR = (minR + maxR) / 2;
+  return [
+    'interpolate', ['linear'], ['zoom'],
+    4,  minR,
+    10, midR,
+    16, maxR,
+  ];
 }
 
 // Current rendered radius of a map circle at the current zoom — used to
 // size the SVG callout dot so it matches the map marker visually.
 function currentMarkerRadius() {
   const z = map ? map.getZoom() : 10;
-  const isCoarse = isTouchDevice();
-  // Mirror the interpolate stops in addLayer above
-  const stops = isCoarse
-    ? [[4, 3], [8, 5], [12, 7], [16, 10]]
-    : [[4, 2], [8, 3.5], [12, 5], [16, 7]];
+  const { minR, maxR } = currentRadiusRange();
+  const midR = (minR + maxR) / 2;
+  const stops = [[4, minR], [10, midR], [16, maxR]];
+  if (z <= stops[0][0]) return stops[0][1];
   for (let i = 0; i < stops.length - 1; i++) {
     const [z0, r0] = stops[i], [z1, r1] = stops[i + 1];
-    if (z <= z0) return r0;
     if (z <= z1) return r0 + (r1 - r0) * (z - z0) / (z1 - z0);
   }
   return stops[stops.length - 1][1];
@@ -693,18 +712,18 @@ function showRadar(ps) {
   }
   candidates.sort((a, b) => a.score - b.score || Math.abs(a.cy - px.y) - Math.abs(b.cy - px.y));
   const best = candidates[0];
-  const side    = best.side;
   const radarCx = best.cx;
   const radarCy = best.cy;
 
-  // Anchor the callout line at the radar's *circle* edge (R_CHART), not the
-  // bounding-box edge (R_BOX/2 = R_CHART + R_PAD) — otherwise the line ends in
-  // empty padding R_PAD pixels short of the radar disc.
-  const anchorX = side === 'right' ? radarCx - R_CHART : radarCx + R_CHART;
+  // Anchor on whichever side of the radar disc actually faces the data point.
+  // (Don't trust `best.side` — when the point is near a screen edge the
+  // candidate cx gets clamped, so the radar can end up on the opposite side
+  // from where `side` claims, and the line then crosses the whole disc to the
+  // far edge — looking like it points at the centre.)
+  const radarToRight = radarCx > px.x;
+  const anchorX = radarToRight ? radarCx - R_CHART : radarCx + R_CHART;
   const anchorY = radarCy;
-  const stubX   = side === 'right'
-    ? px.x + Math.abs(anchorX - px.x) * 0.55
-    : px.x - Math.abs(px.x - anchorX) * 0.55;
+  const stubX   = px.x + (anchorX - px.x) * 0.55;
 
   const ns = 'http://www.w3.org/2000/svg';
   svg.innerHTML = '';
