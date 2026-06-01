@@ -492,7 +492,12 @@ function renderMarkers() {
       fillOpacity: 0.88,
     }).addTo(leafletMap);
 
+    // ── Desktop (fine pointer): hover for radar, Alt+hover for focus ──
+    //    Touch devices (coarse pointer) skip these — some mobile browsers
+    //    dispatch a synthesised mouseover just before tap, which would
+    //    flash a radar before the real click handler runs.
     marker.on('mouseover', e => {
+      if (isCoarse) return;
       clearTimeout(focusClearTimer);
       if (e.originalEvent && e.originalEvent.altKey) {
         // Alt+hover → focus circle centered on this point
@@ -504,6 +509,7 @@ function renderMarkers() {
       }
     });
     marker.on('mouseout', () => {
+      if (isCoarse) return;
       if (focusCircle) {
         // Brief delay so moving to an adjacent marker doesn't flicker
         focusClearTimer = setTimeout(clearFocusCircle, 200);
@@ -511,17 +517,14 @@ function renderMarkers() {
         hideRadar();
       }
     });
-    // Touch / tap support — on mobile use the selected mode (radar or focus)
+    // ── Touch (coarse pointer): tap → current mobileMode (radar / focus) ──
+    //    On fine-pointer devices we let click bubble so the map's empty-area
+    //    click handler keeps its original "clear" semantics.
     marker.on('click', e => {
-      if (isMobileView()) {
-        if (mobileMode === 'focus') {
-          placeFocusCircle(L.latLng(p.lat, p.lon));
-        } else {
-          if (focusCircle) clearFocusCircle();
-          showRadar(ps);
-        }
+      if (!isCoarse) return;  // desktop: don't override original click→clear
+      if (mobileMode === 'focus') {
+        placeFocusCircle(L.latLng(p.lat, p.lon));
       } else {
-        // Desktop click: same behaviour as before (single radar)
         if (focusCircle) clearFocusCircle();
         showRadar(ps);
       }
