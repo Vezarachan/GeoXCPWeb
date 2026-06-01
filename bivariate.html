@@ -95,57 +95,136 @@
       padding-bottom: 2px;
     }
 
+    /* ── Collapsible panel header (used on mobile) ── */
+    .panel-collapse-btn {
+      display: none;
+      background: transparent;
+      border: none;
+      color: #94a3b8;
+      cursor: pointer;
+      padding: 0 0 0 8px;
+      font-size: 14px;
+      line-height: 1;
+      transition: transform 0.2s;
+    }
+    .panel-collapse-btn:hover { color: #e2e8f0; }
+
+    /* ── Mobile mode toggle (hidden on desktop) ── */
+    #mobile-mode-bar {
+      display: none;
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(15, 23, 42, 0.92);
+      border: 1px solid #334155;
+      border-radius: 999px;
+      padding: 4px;
+      z-index: 900;
+      gap: 2px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+    }
+    #mobile-mode-bar button {
+      background: transparent;
+      border: none;
+      color: #cbd5e1;
+      font-family: inherit;
+      font-size: 11.5px;
+      font-weight: 600;
+      padding: 6px 14px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    #mobile-mode-bar button.active {
+      background: linear-gradient(135deg, #3b82f6, #6366f1);
+      color: white;
+    }
+    #mobile-mode-bar button.clear-btn {
+      padding: 6px 10px;
+      color: #94a3b8;
+      font-size: 13px;
+    }
+
     /* ═════════════════ MOBILE (≤ 768px) ═════════════════ */
     @media (max-width: 768px) {
       #ds-select {
         top: 10px; left: 10px;
-        padding: 7px 10px; font-size: 12px;
+        padding: 7px 12px;
+        font-size: 12px;
+        min-height: 34px;
       }
 
+      /* Show mode toggle bar on mobile */
+      #mobile-mode-bar { display: inline-flex; align-items: center; }
+
+      /* Info panel: compact collapsible, anchored top-right */
       #info-panel {
         top: 10px; right: 10px;
         min-width: 0;
-        max-width: calc(100vw - 130px);
-        padding: 9px 12px;
+        max-width: calc(50vw - 8px);
+        padding: 8px 10px;
+        font-size: 11px;
+        max-height: calc(100vh - 80px);
+        overflow: hidden;
+      }
+      .panel-collapse-btn { display: inline-block; }
+      #info-panel.collapsed { padding: 6px 10px; }
+      #info-panel.collapsed .ip-body { display: none; }
+      #info-panel.collapsed .panel-collapse-btn { transform: rotate(-90deg); }
+      .ip-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+      }
+      .ip-title { font-size: 12px; margin-bottom: 0; flex: 1; }
+      .ip-row { gap: 8px; margin-top: 2px; font-size: 10.5px; }
+      #ip-hint { display: none; }    /* Hint replaced by mode toggle bar on mobile */
+      #ip-focus-hint { font-size: 10.5px; }
+
+      /* Bv legend: collapsible to a small chip */
+      #bv-legend {
+        bottom: 12px; left: 10px;
+        padding: 7px 10px;
+        max-width: calc(100vw - 20px);
+        transition: padding 0.2s;
+      }
+      #bv-legend.collapsed {
+        padding: 6px 12px;
+      }
+      #bv-legend.collapsed .bv-layout { display: none; }
+      #bv-legend.collapsed .bv-legend-title {
+        margin-bottom: 0;
         font-size: 11px;
       }
-      .ip-title { font-size: 14px; margin-bottom: 5px; }
-      .ip-row { gap: 10px; margin-top: 2px; }
-      #ip-hint { font-size: 11px; line-height: 1.5; }
-      #ip-hint kbd { font-size: 10px; padding: 0 3px; }
-      #ip-focus-hint { font-size: 11px; }
-
-      #bv-legend {
-        bottom: 14px; left: 10px;
-        padding: 8px 10px;
-        max-width: calc(100vw - 20px);
-      }
-      .bv-legend-title { font-size: 11.5px; margin-bottom: 7px; line-height: 1.35; }
-      .bv-cell { width: 22px; height: 22px; }
-      .bv-axis-y { height: calc(3 * 22px + 2 * 2px); padding-right: 4px; font-size: 10.5px; }
-      .bv-axis-x { font-size: 10.5px; margin-top: 3px; }
-      .bv-axis-label, .bv-unc-label { font-size: 10.5px; }
+      #bv-legend .panel-collapse-btn { display: inline-block; vertical-align: middle; float: right; }
+      #bv-legend.collapsed .panel-collapse-btn { transform: rotate(180deg); }
+      .bv-legend-title { font-size: 11px; margin-bottom: 6px; line-height: 1.3; }
+      .bv-cell { width: 20px; height: 20px; }
+      .bv-axis-y { height: calc(3 * 20px + 2 * 2px); padding-right: 4px; font-size: 10px; }
+      .bv-axis-x { font-size: 10px; margin-top: 3px; }
+      .bv-axis-label, .bv-unc-label { font-size: 10px; }
     }
 
     /* ═════════════════ SMALL MOBILE (≤ 420px) ═════════════════ */
     @media (max-width: 420px) {
+      #ds-select { font-size: 11px; padding: 6px 10px; min-height: 32px; }
       #info-panel {
-        max-width: calc(100vw - 20px);
-        left: 10px; right: 10px; top: 56px;
+        max-width: calc(58vw - 8px);
+        font-size: 10.5px;
       }
-      #ds-select { font-size: 11px; padding: 6px 8px; }
-      .bv-cell { width: 20px; height: 20px; }
-      .bv-axis-y { height: calc(3 * 20px + 2 * 2px); }
+      .ip-title { font-size: 11.5px; }
+      .ip-row { font-size: 10px; }
+      .bv-cell { width: 18px; height: 18px; }
+      .bv-axis-y { height: calc(3 * 18px + 2 * 2px); font-size: 9.5px; }
+      .bv-axis-x, .bv-axis-label, .bv-unc-label { font-size: 9.5px; }
+      #mobile-mode-bar button { padding: 5px 10px; font-size: 11px; }
     }
 
-    /* Touch devices: ensure tap-friendly hint visibility */
+    /* Larger tap target on touch devices for circleMarkers */
     @media (hover: none) and (pointer: coarse) {
-      #ip-hint::after {
-        content: "\A(Tap a point to view its radar; tap empty space to dismiss)";
-        white-space: pre;
-        color: #cbd5e1;
-        font-size: 11px;
-      }
+      .leaflet-interactive { cursor: pointer; }
     }
   </style>
 </head>
@@ -153,23 +232,37 @@
 
 <div id="map" style="position:relative;">
   <svg id="radar-svg"></svg>
+
+  <!-- Mobile-only mode toggle: tap a point to show radar / focus circle -->
+  <div id="mobile-mode-bar" role="tablist" aria-label="Tap mode">
+    <button id="mode-radar-btn" class="active" data-mode="radar" aria-pressed="true">Radar</button>
+    <button id="mode-focus-btn" data-mode="focus" aria-pressed="false">Focus</button>
+    <button id="mode-clear-btn" class="clear-btn" aria-label="Clear">✕</button>
+  </div>
 </div>
 
 <select id="ds-select"></select>
 
 <div id="info-panel">
-  <div class="ip-title">GeoXCP · Bivariate</div>
-  <div class="ip-row"><span class="ip-key">Dataset</span><span class="ip-val" id="ip-ds">—</span></div>
-  <div class="ip-row"><span class="ip-key">Points</span><span class="ip-val" id="ip-n">—</span></div>
-  <div class="ip-row"><span class="ip-key">Test R²</span><span class="ip-val" id="ip-r2">—</span></div>
-  <div class="ip-row" style="margin-top:6px;">
-    <span id="ip-hint">Hover point for radar<br><kbd id="ip-alt-key"></kbd>+hover → focus circle (up to 6 points)<br>Click or <kbd>Esc</kbd> to dismiss</span>
+  <div class="ip-header">
+    <div class="ip-title">GeoXCP · Bivariate</div>
+    <button class="panel-collapse-btn" id="info-collapse" aria-label="Collapse info">▾</button>
   </div>
-  <div id="ip-focus-hint">⊙ Focus active · click or Esc to dismiss</div>
+  <div class="ip-body">
+    <div class="ip-row"><span class="ip-key">Dataset</span><span class="ip-val" id="ip-ds">—</span></div>
+    <div class="ip-row"><span class="ip-key">Points</span><span class="ip-val" id="ip-n">—</span></div>
+    <div class="ip-row"><span class="ip-key">Test R²</span><span class="ip-val" id="ip-r2">—</span></div>
+    <div class="ip-row" style="margin-top:6px;">
+      <span id="ip-hint">Hover point for radar<br><kbd id="ip-alt-key"></kbd>+hover → focus circle (up to 6 points)<br>Click or <kbd>Esc</kbd> to dismiss</span>
+    </div>
+    <div id="ip-focus-hint">⊙ Focus active · click or Esc to dismiss</div>
+  </div>
 </div>
 
 <div id="bv-legend">
-  <div class="bv-legend-title">Color: Avg |SHAP| × Avg Geo Uncertainty</div>
+  <div class="bv-legend-title">Color: Avg |SHAP| × Avg Geo Uncertainty
+    <button class="panel-collapse-btn" id="legend-collapse" aria-label="Collapse legend">▾</button>
+  </div>
   <div class="bv-layout">
     <div class="bv-unc-label">Avg |SHAP| →</div>
     <div class="bv-axis-y" id="bv-axis-y">
@@ -220,8 +313,31 @@ let CONN_GAP = 65;
 
 // ── Focus circle constants ────────────────────────────────
 const FOCUS_K  = 6;    // max points shown
-const R_MINI   = 78;   // mini radar radius (px)
-const MINI_GAP = 32;   // gap: circle edge → mini radar edge
+let   R_MINI   = 78;   // mini radar radius (px) — set per viewport in setRadarSizes()
+let   MINI_GAP = 32;   // gap: circle edge → mini radar edge
+
+// ── Responsive sizing: shrink radar/mini-radar on small viewports ──
+// Call at the start of every show/render to keep sizes in sync with current viewport.
+function setRadarSizes() {
+  const w = window.innerWidth;
+  if (w <= 420) {
+    R_CHART = 62;  R_PAD = 30;
+    R_MINI  = 42;  MINI_GAP = 10;
+  } else if (w <= 768) {
+    R_CHART = 80;  R_PAD = 40;
+    R_MINI  = 52;  MINI_GAP = 14;
+  } else if (w <= 1024) {
+    R_CHART = 100; R_PAD = 60;
+    R_MINI  = 66;  MINI_GAP = 24;
+  } else {
+    R_CHART = 115; R_PAD = 72;
+    R_MINI  = 78;  MINI_GAP = 32;
+  }
+  R_BOX = R_CHART * 2 + R_PAD * 2;
+}
+function isMobileView() { return window.innerWidth <= 768; }
+// Mobile interaction mode: 'radar' (single point) or 'focus' (top-K nearest)
+let mobileMode = 'radar';
 
 // ── State ────────────────────────────────────────────────
 let data       = null;
@@ -362,10 +478,13 @@ function renderMarkers() {
   markers.forEach(m => m.remove());
   markers = [];
 
+  // Slightly larger marker radius on coarse-pointer (touch) devices for tap accuracy
+  const isCoarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  const baseR = isCoarse ? 7 : 5;
   pointStats.forEach(ps => {
     const p = ps.point;
     const marker = L.circleMarker([p.lat, p.lon], {
-      radius: 5,
+      radius: baseR,
       fillColor: ps.color,
       color: 'rgba(30,41,59,0.5)',
       weight: 0.6,
@@ -392,10 +511,20 @@ function renderMarkers() {
         hideRadar();
       }
     });
-    // Touch / tap support: emulate hover-radar on tap
+    // Touch / tap support — on mobile use the selected mode (radar or focus)
     marker.on('click', e => {
-      if (focusCircle) clearFocusCircle();
-      showRadar(ps);
+      if (isMobileView()) {
+        if (mobileMode === 'focus') {
+          placeFocusCircle(L.latLng(p.lat, p.lon));
+        } else {
+          if (focusCircle) clearFocusCircle();
+          showRadar(ps);
+        }
+      } else {
+        // Desktop click: same behaviour as before (single radar)
+        if (focusCircle) clearFocusCircle();
+        showRadar(ps);
+      }
       if (e.originalEvent) L.DomEvent.stop(e.originalEvent);
     });
     markers.push(marker);
@@ -417,10 +546,10 @@ function showRadar(ps) {
   const mapW = con.offsetWidth;
   const mapH = con.offsetHeight;
 
-  R_CHART  = 115;
-  R_PAD    = 72;
-  R_BOX    = R_CHART * 2 + R_PAD * 2;
-  CONN_GAP = Math.round(Math.min(mapW * 0.08, 120));
+  setRadarSizes();
+  CONN_GAP = isMobileView()
+    ? Math.round(Math.min(mapW * 0.05, 40))
+    : Math.round(Math.min(mapW * 0.08, 120));
 
   const px = leafletMap.latLngToContainerPoint([p.lat, p.lon]);
 
@@ -589,20 +718,26 @@ function drawRadar(g, ns, ps) {
     g.appendChild(dot);
   });
 
-  // Feature labels
-  const LABEL_R = R_CHART + 18;
+  // Feature labels (font-sizes shrink on mobile to match smaller R_CHART)
+  const mob       = isMobileView();
+  const FS_LABEL  = mob ? '8.5' : '9.5';
+  const FS_SCALE  = mob ? '8'   : '9';
+  const FS_TITLE  = mob ? '11'  : '15';
+  const FS_SUB    = mob ? '9'   : '10';
+  const LABEL_R   = R_CHART + (mob ? 11 : 18);
+  const labelMaxLen = mob ? 9 : 13;
   feats.forEach((f, i) => {
     const a    = angle(i);
     const pos  = polar(LABEL_R, a);
     const cosA = Math.cos(a);
     const sinA = Math.sin(a);
     const raw  = labels[f] || f;
-    const short = raw.length > 13 ? raw.slice(0, 12) + '…' : raw;
+    const short = raw.length > labelMaxLen ? raw.slice(0, labelMaxLen - 1) + '…' : raw;
 
     const text = document.createElementNS(ns, 'text');
     text.setAttribute('x', pos.x.toFixed(1));
     text.setAttribute('y', pos.y.toFixed(1));
-    text.setAttribute('font-size',   '9.5');
+    text.setAttribute('font-size',   FS_LABEL);
     text.setAttribute('font-family', 'Inter, sans-serif');
     text.setAttribute('fill',        '#1e293b');
     text.setAttribute('font-weight', '600');
@@ -627,7 +762,7 @@ function drawRadar(g, ns, ps) {
     const text = document.createElementNS(ns, 'text');
     text.setAttribute('x',  '5');
     text.setAttribute('y',  (-r).toFixed(1));
-    text.setAttribute('font-size',   '9');
+    text.setAttribute('font-size',   FS_SCALE);
     text.setAttribute('font-family', 'Inter, sans-serif');
     text.setAttribute('fill',        '#475569');
     text.setAttribute('dominant-baseline', 'middle');
@@ -646,8 +781,8 @@ function drawRadar(g, ns, ps) {
   [['white','4',null], ['#0f172a','0','#0f172a']].forEach(([stroke, sw, fill]) => {
     const t = document.createElementNS(ns, 'text');
     t.setAttribute('x', '0');
-    t.setAttribute('y', (-R_CHART - 26).toFixed(1));
-    t.setAttribute('font-size',   '15');
+    t.setAttribute('y', (-R_CHART - (mob ? 18 : 26)).toFixed(1));
+    t.setAttribute('font-size',   FS_TITLE);
     t.setAttribute('font-family', 'Inter, sans-serif');
     t.setAttribute('font-weight', '700');
     t.setAttribute('text-anchor', 'middle');
@@ -665,8 +800,8 @@ function drawRadar(g, ns, ps) {
   [['white','3',null], ['#334155','0','#334155']].forEach(([stroke, sw, fill]) => {
     const t = document.createElementNS(ns, 'text');
     t.setAttribute('x', '0');
-    t.setAttribute('y', (-R_CHART - 12).toFixed(1));
-    t.setAttribute('font-size',   '10');
+    t.setAttribute('y', (-R_CHART - (mob ? 7 : 12)).toFixed(1));
+    t.setAttribute('font-size',   FS_SUB);
     t.setAttribute('font-family', 'Inter, sans-serif');
     t.setAttribute('text-anchor', 'middle');
     t.setAttribute('dominant-baseline', 'middle');
@@ -727,6 +862,7 @@ function getPointsInCircle() {
 // ── Render all focus mini radars ──────────────────────────
 function renderFocusRadars() {
   if (!focusCenter || !focusCircle) return;
+  setRadarSizes();
   const inCircle = getPointsInCircle();
 
   const svg  = document.getElementById('radar-svg');
@@ -757,8 +893,9 @@ function renderFocusRadars() {
   }));
 
   // ── Angular spreading: guaranteed no overlap ──────────────
-  // min center-to-center distance: disk diameter + label height (label sits ~18px above disk top)
-  const minSep = (R_MINI + 5) * 2 + 80;  // covers disk + feature labels extending outward
+  // min center-to-center distance: disk diameter + label height (label sits outside disk)
+  const labelPad = isMobileView() ? 36 : 80;
+  const minSep = (R_MINI + 5) * 2 + labelPad;  // covers disk + feature labels extending outward
   const n = inCircle.length;
 
   // Ensure placeDist is large enough for all n radars to fit on the ring
@@ -808,7 +945,7 @@ function renderFocusRadars() {
   }
 
   // Convert final angles → Cartesian positions, clamp to viewport
-  const PAD = R_MINI + 30;  // extra room for feature labels outside disk
+  const PAD = R_MINI + (isMobileView() ? 14 : 30);  // extra room for feature labels outside disk
   const positions = ord.map(e => {
     let x = cx0.x + Math.cos(e.ang) * placeDist;
     let y = cx0.y + Math.sin(e.ang) * placeDist;
@@ -841,7 +978,7 @@ function renderFocusRadars() {
   }
 
   // ── Draw elbow connector lines (horizontal stub → radar center) ──
-  const STUB = 32;  // horizontal stub length in px
+  const STUB = isMobileView() ? 14 : 32;  // horizontal stub length in px
   positions.forEach(pos => {
     const stubX = pos.ptPx.x + (pos.x >= pos.ptPx.x ? STUB : -STUB);
     const conn = document.createElementNS(ns, 'polyline');
@@ -1064,6 +1201,83 @@ dsSel.addEventListener('change', e => {
   markers = [];
   loadDataset(DATASETS[+e.target.value]);
 });
+
+// ── Mobile mode toggle & collapsible panels ──────────────
+(function () {
+  // Mode toggle: switch tap behaviour between radar / focus
+  const modeRadar = document.getElementById('mode-radar-btn');
+  const modeFocus = document.getElementById('mode-focus-btn');
+  const modeClear = document.getElementById('mode-clear-btn');
+
+  function setMode(m) {
+    mobileMode = m;
+    [modeRadar, modeFocus].forEach(b => {
+      const on = b.dataset.mode === m;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    // Switching mode clears the current display
+    if (focusCircle) clearFocusCircle();
+    else hideRadar();
+  }
+  modeRadar.addEventListener('click', () => setMode('radar'));
+  modeFocus.addEventListener('click', () => setMode('focus'));
+  modeClear.addEventListener('click', () => {
+    if (focusCircle) clearFocusCircle();
+    else hideRadar();
+  });
+
+  // Collapsible info panel
+  const ipPanel = document.getElementById('info-panel');
+  const ipBtn   = document.getElementById('info-collapse');
+  if (ipBtn) {
+    // Start collapsed on small screens to free map space
+    if (window.innerWidth <= 768) ipPanel.classList.add('collapsed');
+    ipBtn.addEventListener('click', () => ipPanel.classList.toggle('collapsed'));
+    // Tap header (not just chevron) to expand when collapsed
+    ipPanel.querySelector('.ip-header').addEventListener('click', e => {
+      if (e.target === ipBtn) return;
+      if (ipPanel.classList.contains('collapsed')) ipPanel.classList.remove('collapsed');
+    });
+  }
+
+  // Collapsible bivariate legend
+  const bvLegend = document.getElementById('bv-legend');
+  const lgBtn    = document.getElementById('legend-collapse');
+  if (lgBtn) {
+    // Start collapsed on small screens
+    if (window.innerWidth <= 768) bvLegend.classList.add('collapsed');
+    lgBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      bvLegend.classList.toggle('collapsed');
+    });
+    bvLegend.querySelector('.bv-legend-title').addEventListener('click', e => {
+      if (e.target === lgBtn) return;
+      if (bvLegend.classList.contains('collapsed')) bvLegend.classList.remove('collapsed');
+    });
+  }
+
+  // Don't let panel/toggle clicks bubble into the Leaflet map
+  ['mobile-mode-bar', 'info-panel', 'bv-legend', 'ds-select'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && window.L) {
+      L.DomEvent.disableClickPropagation(el);
+      L.DomEvent.disableScrollPropagation(el);
+    }
+  });
+
+  // Viewport changes (rotation, resize): re-render any active radar
+  let _rsT = null;
+  window.addEventListener('resize', () => {
+    if (leafletMap) leafletMap.invalidateSize();
+    clearTimeout(_rsT);
+    _rsT = setTimeout(() => {
+      if (focusCircle) renderFocusRadars();
+      // Single hover radar can't easily be re-shown without state; just hide it
+      else { const s = document.getElementById('radar-svg'); if (s) s.style.display = 'none'; }
+    }, 150);
+  });
+})();
 
 loadDataset(DATASETS[0]);
 </script>
