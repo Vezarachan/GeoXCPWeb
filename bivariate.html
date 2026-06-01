@@ -21,6 +21,17 @@
       z-index: 650;
       display: none;
     }
+    /* SVG `pointer-events: none` does NOT propagate to descendants by default —
+       radar dots/polygons would re-capture taps after the radar is drawn.
+       Force every child of #radar-svg to also be click-through. */
+    #radar-svg * { pointer-events: none; }
+
+    /* Tap visual feedback on circleMarkers */
+    .leaflet-interactive.tap-flash {
+      stroke: #0f172a !important;
+      stroke-width: 3 !important;
+      transition: stroke-width 0.18s;
+    }
 
     /* ── Dataset selector ── */
     #ds-select {
@@ -445,8 +456,10 @@ function setup(json, ds) {
     leafletMap = L.map('map', {
       zoomControl: !isTouchDevice(),   // pinch-to-zoom is enough on touch; frees top-left for ds-select
       attributionControl: true,
-      tap: true,
-      tapTolerance: 22,                // default 15 — a bit forgiving so small finger wobble still triggers click
+      // Leaflet 1.x's tap polyfill is known to swallow circleMarker clicks on
+      // iOS Safari / Android Chrome. Modern browsers fire click on tap
+      // natively with no 300ms delay, so disabling the polyfill is safer.
+      tap: false,
     });
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
       attribution: '© <a href="https://www.openstreetmap.org/">OpenStreetMap</a> © <a href="https://carto.com/">CARTO</a>',
@@ -499,9 +512,10 @@ function renderMarkers() {
   markers.forEach(m => m.remove());
   markers = [];
 
-  // Slightly larger marker radius on touch devices for tap accuracy
+  // Larger marker radius on touch devices: 14px gives a ~28px hit area —
+  // much closer to Apple/Google's 44px tap-target guideline.
   const isCoarse = isTouchDevice();
-  const baseR = isCoarse ? 8 : 5;
+  const baseR = isCoarse ? 14 : 5;
   pointStats.forEach(ps => {
     const p = ps.point;
     const marker = L.circleMarker([p.lat, p.lon], {
@@ -541,16 +555,59 @@ function renderMarkers() {
     // ── Touch (coarse pointer): tap → current mobileMode (radar / focus) ──
     //    On fine-pointer devices we let click bubble so the map's empty-area
     //    click handler keeps its original "clear" semantics.
-    marker.on('click', e => {
-      if (!isCoarse) return;  // desktop: don't override original click→clear
+    const handleTap = () => {
+      // Visual feedback first so user knows the tap registered, even if
+      // showRadar somehow throws later
+      const el = marker.getElement && marker.getElement();
+      if (el) {
+        el.classList.add('tap-flash');
+        setTimeout(() => el.classList.remove('tap-flash'), 220);
+      }
       if (mobileMode === 'focus') {
         placeFocusCircle(L.latLng(p.lat, p.lon));
       } else {
         if (focusCircle) clearFocusCircle();
         showRadar(ps);
       }
+    };
+
+    marker.on('click', e => {
+      if (!isCoarse) return;  // desktop: don't override original click→clear
+      handleTap();
       if (e.originalEvent) L.DomEvent.stop(e.originalEvent);
     });
+
+    // Native fallback: bind click + touchend directly on the marker's SVG
+    // path. Leaflet's marker click event is sometimes swallowed by gesture
+    // detection on iOS Safari / Android Chrome — these listeners run even
+    // when Leaflet's event doesn't fire.
+    if (isCoarse) {
+      const attachNativeFallback = () => {
+        const el = marker.getElement && marker.getElement();
+        if (!el || el.__bvTapBound) return;
+        el.__bvTapBound = true;
+        let touchHandled = false;
+        el.addEventListener('touchend', ev => {
+          touchHandled = true;
+          ev.preventDefault();
+          ev.stopPropagation();
+          handleTap();
+          // Reset the flag a tick later so a real click (not from this tap)
+          // can still come through if it's the first interaction.
+          setTimeout(() => { touchHandled = false; }, 400);
+        }, { passive: false });
+        el.addEventListener('click', ev => {
+          if (touchHandled) return;  // already handled via touchend
+          ev.stopPropagation();
+          handleTap();
+        });
+      };
+      // getElement() may return null until the marker is added to the map;
+      // a microtask later it's available.
+      attachNativeFallback();
+      setTimeout(attachNativeFallback, 0);
+    }
+
     markers.push(marker);
   });
 }
