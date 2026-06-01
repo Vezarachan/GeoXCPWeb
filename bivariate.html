@@ -762,12 +762,36 @@ function showRadar(ps) {
   svg.style.display = 'block';
 }
 
-// ── Draw full radar chart inside group ────────────────────
-function drawRadar(g, ns, ps) {
-  const p      = ps.point;
-  const feats  = data.features;
-  const labels = data.feature_labels || {};
-  const n      = feats.length;
+// ── Halo text helper (white outline so SVG text reads over any background) ──
+function svgHaloText(g, ns, txt, x, y, size, weight, fill, anchor, halo) {
+  const t = document.createElementNS(ns, 'text');
+  t.setAttribute('x', x.toFixed(1));
+  t.setAttribute('y', y.toFixed(1));
+  t.setAttribute('font-size', String(size));
+  t.setAttribute('font-family', 'Inter, sans-serif');
+  t.setAttribute('font-weight', String(weight));
+  t.setAttribute('fill', fill);
+  t.setAttribute('text-anchor', anchor || 'middle');
+  t.setAttribute('dominant-baseline', 'middle');
+  t.setAttribute('stroke', 'white');
+  t.setAttribute('stroke-width', String(halo == null ? 2.5 : halo));
+  t.setAttribute('paint-order', 'stroke');
+  t.textContent = txt;
+  g.appendChild(t);
+}
+
+// ── Unified radar drawing (used for both single-point radar and focus mini radars) ──
+// RM = radar circle radius (R_CHART for the main one, R_MINI for the focus ones).
+// All visual elements scale with RM so the two sizes share a single design language:
+//   frosted bg disc + ps.color border, 2 grid rings, dashed zero ref, axis spokes,
+//   shaded uncertainty band, blue SHAP polygon with vertex dots, signed SHAP value
+//   labels just outside each vertex, feature labels around the perimeter, and a
+//   "yLabel name / yValue" header above the disc.
+function drawRadarChart(g, ns, ps, RM, opts) {
+  const p     = ps.point;
+  const feats = data.features;
+  const n     = feats.length;
+  const isFull = opts.variant === 'full';
 
   const shapVals   = feats.map(f => p.features[f].shap);
   const hasUncBand = feats.every(f => p.features[f].lower_bound != null && p.features[f].upper_bound != null);
@@ -780,45 +804,82 @@ function drawRadar(g, ns, ps) {
 
   const allAbsVals = [...shapVals, ...lowerVals, ...upperVals].map(Math.abs);
   const absMax = Math.max(...allAbsVals) * 1.05 || 1;
-  const valToR = v => Math.max(0, ((v + absMax) / (2 * absMax)) * R_CHART);
+  const valToR = v => Math.max(0, ((v + absMax) / (2 * absMax)) * RM);
   const angle  = i => (i / n) * 2 * Math.PI - Math.PI / 2;
   const polar  = (r, a) => ({ x: r * Math.cos(a), y: r * Math.sin(a) });
 
-  [0.25, 0.5, 0.75, 1.0].forEach(t => {
+  // Visual parameters scale with RM via a single factor; full-size also picks
+  // larger label/value fonts so the bigger disc doesn't look sparse.
+  const mob       = isMobileView();
+  const bgPad     = isFull ? 10 : 8;
+  const bgStroke  = isFull ? 2.5 : 2;
+  const axisStroke = isFull ? 0.8 : 0.5;
+  const ringInner = isFull ? 0.9 : 0.7;
+  const ringOuter = isFull ? 1.2 : 0.9;
+  const zeroStroke = isFull ? 1.4 : 1.0;
+  const polyStroke = isFull ? 1.8 : 1.5;
+  const dotR      = isFull ? 2.6 : 1.8;
+  const dotStroke = isFull ? 0.9 : 0.7;
+  // Font sizes
+  const fsLabel  = isFull ? (mob ? 9    : 10  ) : 7.5;
+  const fsValue  = isFull ? (mob ? 8    : 9   ) : 7;
+  const fsName   = isFull ? (mob ? 9.5  : 11  ) : 8.5;
+  const fsBig    = isFull ? (mob ? 14   : 17  ) : 13;
+  // Vertex value offset & label radius — proportional to RM
+  const valOffset = isFull ? 11 : 9;
+  const LABEL_R   = RM + (isFull ? (mob ? 14 : 18) : 15);
+  const labelMaxLen = isFull ? (mob ? 12 : 14) : 11;
+  // Title vertical positions above the disc
+  const nameY = -RM - (isFull ? (mob ? 28 : 38) : 34);
+  const valueY = -RM - (isFull ? (mob ? 13 : 17) : 17);
+
+  // 1. Frosted background disc with point-color border
+  const bg = document.createElementNS(ns, 'circle');
+  bg.setAttribute('cx', 0); bg.setAttribute('cy', 0);
+  bg.setAttribute('r', (RM + bgPad).toFixed(1));
+  bg.setAttribute('fill', 'rgba(255,255,255,0.85)');
+  bg.setAttribute('stroke', ps.color);
+  bg.setAttribute('stroke-width', String(bgStroke));
+  g.appendChild(bg);
+
+  // 2. Grid rings (inner @ 0.5 R, outer @ 1.0 R)
+  [0.5, 1.0].forEach(t => {
     const el = document.createElementNS(ns, 'circle');
     el.setAttribute('cx', 0); el.setAttribute('cy', 0);
-    el.setAttribute('r', (t * R_CHART).toFixed(1));
+    el.setAttribute('r', (t * RM).toFixed(1));
     el.setAttribute('fill', 'none');
     el.setAttribute('stroke', t === 1.0 ? '#94a3b8' : '#e2e8f0');
-    el.setAttribute('stroke-width', t === 1.0 ? '1.2' : '0.8');
+    el.setAttribute('stroke-width', String(t === 1.0 ? ringOuter : ringInner));
     g.appendChild(el);
   });
 
+  // 3. Zero-reference circle (dashed orange)
   const zeroEl = document.createElementNS(ns, 'circle');
   zeroEl.setAttribute('cx', 0); zeroEl.setAttribute('cy', 0);
   zeroEl.setAttribute('r', valToR(0).toFixed(1));
   zeroEl.setAttribute('fill', 'none');
   zeroEl.setAttribute('stroke', '#f59e0b');
-  zeroEl.setAttribute('stroke-width', '1.4');
-  zeroEl.setAttribute('stroke-dasharray', '4,3');
+  zeroEl.setAttribute('stroke-width', String(zeroStroke));
+  zeroEl.setAttribute('stroke-dasharray', isFull ? '4,3' : '3,2');
   g.appendChild(zeroEl);
 
+  // 4. Axis spokes
   feats.forEach((_, i) => {
-    const end = polar(R_CHART, angle(i));
-    const line = document.createElementNS(ns, 'line');
-    line.setAttribute('x1', 0); line.setAttribute('y1', 0);
-    line.setAttribute('x2', end.x.toFixed(1)); line.setAttribute('y2', end.y.toFixed(1));
-    line.setAttribute('stroke', '#cbd5e1');
-    line.setAttribute('stroke-width', '0.8');
-    g.appendChild(line);
+    const end = polar(RM, angle(i));
+    const ln  = document.createElementNS(ns, 'line');
+    ln.setAttribute('x1', 0); ln.setAttribute('y1', 0);
+    ln.setAttribute('x2', end.x.toFixed(1)); ln.setAttribute('y2', end.y.toFixed(1));
+    ln.setAttribute('stroke', '#cbd5e1');
+    ln.setAttribute('stroke-width', String(axisStroke));
+    g.appendChild(ln);
   });
 
+  // 5. Uncertainty band (between lower & upper, evenodd fill)
   const upperPts  = feats.map((f, i) => polar(valToR(upperVals[i]), angle(i)));
   const lowerPts  = feats.map((f, i) => polar(Math.max(0, valToR(lowerVals[i])), angle(i)));
   const ptStr     = pts => pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
   const upperPath = upperPts.map((p, i) => `${i===0?'M':'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') + ' Z';
   const lowerPath = [...lowerPts].reverse().map((p, i) => `${i===0?'M':'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') + ' Z';
-
   const band = document.createElementNS(ns, 'path');
   band.setAttribute('d', `${upperPath} ${lowerPath}`);
   band.setAttribute('fill', 'rgba(147,197,253,0.45)');
@@ -826,116 +887,67 @@ function drawRadar(g, ns, ps) {
   band.setAttribute('stroke', 'none');
   g.appendChild(band);
 
+  // 6. SHAP polygon (blue outline)
   const shapPts = feats.map((f, i) => polar(valToR(shapVals[i]), angle(i)));
   const shapPoly = document.createElementNS(ns, 'polygon');
   shapPoly.setAttribute('points', ptStr(shapPts));
   shapPoly.setAttribute('fill', 'none');
   shapPoly.setAttribute('stroke', '#2563eb');
-  shapPoly.setAttribute('stroke-width', '1.8');
+  shapPoly.setAttribute('stroke-width', String(polyStroke));
   shapPoly.setAttribute('stroke-linejoin', 'round');
   g.appendChild(shapPoly);
 
+  // 7. Vertex dots (emphasise the polygon corners)
   shapPts.forEach(pt => {
     const dot = document.createElementNS(ns, 'circle');
     dot.setAttribute('cx', pt.x.toFixed(1));
     dot.setAttribute('cy', pt.y.toFixed(1));
-    dot.setAttribute('r',  '2.2');
+    dot.setAttribute('r',  String(dotR));
     dot.setAttribute('fill', '#2563eb');
     dot.setAttribute('stroke', 'white');
-    dot.setAttribute('stroke-width', '0.8');
+    dot.setAttribute('stroke-width', String(dotStroke));
     g.appendChild(dot);
   });
 
-  const mob       = isMobileView();
-  const FS_LABEL  = mob ? '8.5' : '9.5';
-  const FS_SCALE  = mob ? '8'   : '9';
-  const FS_TITLE  = mob ? '11'  : '15';
-  const FS_SUB    = mob ? '9'   : '10';
-  const LABEL_R   = R_CHART + (mob ? 11 : 18);
-  const labelMaxLen = mob ? 9 : 13;
+  // 8. Signed SHAP value labels just outside each vertex
   feats.forEach((f, i) => {
     const a    = angle(i);
-    const pos  = polar(LABEL_R, a);
+    const vr   = valToR(shapVals[i]);
+    const vpos = polar(vr + valOffset, a);
+    const val  = shapVals[i];
+    const txt  = (val >= 0 ? '+' : '') + val.toFixed(1);
+    svgHaloText(g, ns, txt, vpos.x, vpos.y, fsValue, 600,
+      val >= 0 ? '#1d4ed8' : '#be123c', 'middle');
+  });
+
+  // 9. Feature labels around the perimeter
+  const labels = data.feature_labels || {};
+  feats.forEach((f, i) => {
+    const a    = angle(i);
+    const lpos = polar(LABEL_R, a);
     const cosA = Math.cos(a);
-    const sinA = Math.sin(a);
-    const raw  = labels[f] || f;
-    const short = raw.length > labelMaxLen ? raw.slice(0, labelMaxLen - 1) + '…' : raw;
-
-    const text = document.createElementNS(ns, 'text');
-    text.setAttribute('x', pos.x.toFixed(1));
-    text.setAttribute('y', pos.y.toFixed(1));
-    text.setAttribute('font-size',   FS_LABEL);
-    text.setAttribute('font-family', 'Inter, sans-serif');
-    text.setAttribute('fill',        '#1e293b');
-    text.setAttribute('font-weight', '600');
-    text.setAttribute('stroke',      'white');
-    text.setAttribute('stroke-width','3');
-    text.setAttribute('stroke-linejoin', 'round');
-    text.setAttribute('paint-order', 'stroke');
-    if      (cosA >  0.15) text.setAttribute('text-anchor', 'start');
-    else if (cosA < -0.15) text.setAttribute('text-anchor', 'end');
-    else                   text.setAttribute('text-anchor', 'middle');
-    if      (sinA >  0.2) text.setAttribute('dominant-baseline', 'hanging');
-    else if (sinA < -0.2) text.setAttribute('dominant-baseline', 'auto');
-    else                  text.setAttribute('dominant-baseline', 'middle');
-    text.textContent = short;
-    g.appendChild(text);
+    const anchor = Math.abs(cosA) < 0.25 ? 'middle' : (cosA > 0 ? 'start' : 'end');
+    const raw   = labels[f] || f;
+    const lbl   = raw.length > labelMaxLen ? raw.slice(0, labelMaxLen - 1) + '…' : raw;
+    svgHaloText(g, ns, lbl, lpos.x, lpos.y, fsLabel, 600, '#1e293b', anchor,
+      isFull ? 3 : 2.5);
   });
 
-  const scaleVals = [absMax * 0.5, 0, -absMax * 0.5];
-  scaleVals.forEach(v => {
-    const r    = valToR(v);
-    const text = document.createElementNS(ns, 'text');
-    text.setAttribute('x',  '5');
-    text.setAttribute('y',  (-r).toFixed(1));
-    text.setAttribute('font-size',   FS_SCALE);
-    text.setAttribute('font-family', 'Inter, sans-serif');
-    text.setAttribute('fill',        '#475569');
-    text.setAttribute('dominant-baseline', 'middle');
-    text.setAttribute('stroke',      'white');
-    text.setAttribute('stroke-width','2.5');
-    text.setAttribute('paint-order', 'stroke');
-    text.textContent = v.toFixed(1);
-    g.appendChild(text);
-  });
-
+  // 10. Header above the disc: yLabel name (small) + yValue (big)
   const yField = data.meta.y_field || (currentDS && currentDS.yField) || 'price';
   const yVal   = p[yField];
-  const yStr   = yVal != null ? fmtY(yVal) : '—';
-
-  [['white','4',null], ['#0f172a','0','#0f172a']].forEach(([stroke, sw, fill]) => {
-    const t = document.createElementNS(ns, 'text');
-    t.setAttribute('x', '0');
-    t.setAttribute('y', (-R_CHART - (mob ? 18 : 26)).toFixed(1));
-    t.setAttribute('font-size',   FS_TITLE);
-    t.setAttribute('font-family', 'Inter, sans-serif');
-    t.setAttribute('font-weight', '700');
-    t.setAttribute('text-anchor', 'middle');
-    t.setAttribute('dominant-baseline', 'middle');
-    t.setAttribute('stroke', stroke);
-    t.setAttribute('stroke-width', sw);
-    t.setAttribute('stroke-linejoin', 'round');
-    if (fill) t.setAttribute('fill', fill); else t.setAttribute('fill', 'none');
-    t.textContent = yStr;
-    g.appendChild(t);
-  });
-
-  const subText = `Avg|SHAP| ${ps.avgShap.toFixed(1)}  ·  Avg Unc ±${ps.avgUnc.toFixed(1)}`;
-  [['white','3',null], ['#334155','0','#334155']].forEach(([stroke, sw, fill]) => {
-    const t = document.createElementNS(ns, 'text');
-    t.setAttribute('x', '0');
-    t.setAttribute('y', (-R_CHART - (mob ? 7 : 12)).toFixed(1));
-    t.setAttribute('font-size',   FS_SUB);
-    t.setAttribute('font-family', 'Inter, sans-serif');
-    t.setAttribute('text-anchor', 'middle');
-    t.setAttribute('dominant-baseline', 'middle');
-    t.setAttribute('stroke', stroke);
-    t.setAttribute('stroke-width', sw);
-    if (fill) t.setAttribute('fill', fill); else t.setAttribute('fill', 'none');
-    t.textContent = subText;
-    g.appendChild(t);
-  });
+  if (yVal != null) {
+    svgHaloText(g, ns, currentDS ? currentDS.yLabel : yField,
+      0, nameY, fsName, 500, '#64748b', 'middle', isFull ? 3 : 2.5);
+    svgHaloText(g, ns, fmtY(yVal),
+      0, valueY, fsBig, 700, '#0f172a', 'middle', isFull ? 4 : 3);
+  }
 }
+
+// ── Thin wrappers so existing call sites stay unchanged ──
+function drawRadar(g, ns, ps)     { drawRadarChart(g, ns, ps, R_CHART, { variant: 'full' }); }
+function drawMiniRadar(g, ns, ps) { drawRadarChart(g, ns, ps, R_MINI, { variant: 'mini' }); }
+
 
 // ── Focus circle: clear ──────────────────────────────────
 function clearFocusCircle() {
@@ -1115,148 +1127,6 @@ function renderFocusRadars() {
     drawMiniRadar(g, ns, pos.ps);
     svg.appendChild(g);
   });
-}
-
-// ── Mini radar (compact, no axis labels) ─────────────────
-function drawMiniRadar(g, ns, ps) {
-  const p     = ps.point;
-  const feats = data.features;
-  const n     = feats.length;
-  const RM    = R_MINI;
-
-  const shapVals   = feats.map(f => p.features[f].shap);
-  const hasUncBand = feats.every(f => p.features[f].lower_bound != null && p.features[f].upper_bound != null);
-  const lowerVals  = hasUncBand
-    ? feats.map(f => p.features[f].lower_bound)
-    : feats.map(f => p.features[f].shap - p.features[f].geo_uncertainty);
-  const upperVals  = hasUncBand
-    ? feats.map(f => p.features[f].upper_bound)
-    : feats.map(f => p.features[f].shap + p.features[f].geo_uncertainty);
-
-  const allAbsVals = [...shapVals, ...lowerVals, ...upperVals].map(Math.abs);
-  const absMax = Math.max(...allAbsVals) * 1.05 || 1;
-  const valToR = v => Math.max(0, ((v + absMax) / (2 * absMax)) * RM);
-  const angle  = i => (i / n) * 2 * Math.PI - Math.PI / 2;
-  const polar  = (r, a) => ({ x: r * Math.cos(a), y: r * Math.sin(a) });
-
-  const bg = document.createElementNS(ns, 'circle');
-  bg.setAttribute('cx', 0); bg.setAttribute('cy', 0);
-  bg.setAttribute('r', (RM + 8).toFixed(1));
-  bg.setAttribute('fill', 'rgba(255,255,255,0.82)');
-  bg.setAttribute('stroke', ps.color);
-  bg.setAttribute('stroke-width', '2');
-  g.appendChild(bg);
-
-  [0.5, 1.0].forEach(t => {
-    const el = document.createElementNS(ns, 'circle');
-    el.setAttribute('cx', 0); el.setAttribute('cy', 0);
-    el.setAttribute('r', (t * RM).toFixed(1));
-    el.setAttribute('fill', 'none');
-    el.setAttribute('stroke', t === 1.0 ? '#94a3b8' : '#e2e8f0');
-    el.setAttribute('stroke-width', '0.7');
-    g.appendChild(el);
-  });
-
-  const zeroEl = document.createElementNS(ns, 'circle');
-  zeroEl.setAttribute('cx', 0); zeroEl.setAttribute('cy', 0);
-  zeroEl.setAttribute('r', valToR(0).toFixed(1));
-  zeroEl.setAttribute('fill', 'none');
-  zeroEl.setAttribute('stroke', '#f59e0b');
-  zeroEl.setAttribute('stroke-width', '1');
-  zeroEl.setAttribute('stroke-dasharray', '3,2');
-  g.appendChild(zeroEl);
-
-  feats.forEach((_, i) => {
-    const end = polar(RM, angle(i));
-    const ln  = document.createElementNS(ns, 'line');
-    ln.setAttribute('x1', 0); ln.setAttribute('y1', 0);
-    ln.setAttribute('x2', end.x.toFixed(1)); ln.setAttribute('y2', end.y.toFixed(1));
-    ln.setAttribute('stroke', '#cbd5e1');
-    ln.setAttribute('stroke-width', '0.5');
-    g.appendChild(ln);
-  });
-
-  const upperPts  = feats.map((f, i) => polar(valToR(upperVals[i]), angle(i)));
-  const lowerPts  = feats.map((f, i) => polar(Math.max(0, valToR(lowerVals[i])), angle(i)));
-  const upperPath = upperPts.map((p, i) => `${i===0?'M':'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') + ' Z';
-  const lowerPath = [...lowerPts].reverse().map((p, i) => `${i===0?'M':'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') + ' Z';
-  const band = document.createElementNS(ns, 'path');
-  band.setAttribute('d', `${upperPath} ${lowerPath}`);
-  band.setAttribute('fill', 'rgba(147,197,253,0.50)');
-  band.setAttribute('fill-rule', 'evenodd');
-  band.setAttribute('stroke', 'none');
-  g.appendChild(band);
-
-  const shapPts = feats.map((f, i) => polar(valToR(shapVals[i]), angle(i)));
-  const ptStr   = pts => pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-  const shapPoly = document.createElementNS(ns, 'polygon');
-  shapPoly.setAttribute('points', ptStr(shapPts));
-  shapPoly.setAttribute('fill', 'none');
-  shapPoly.setAttribute('stroke', '#2563eb');
-  shapPoly.setAttribute('stroke-width', '1.5');
-  shapPoly.setAttribute('stroke-linejoin', 'round');
-  g.appendChild(shapPoly);
-
-  const mkSvgText = (txt, x, y, size, weight, color, anchor) => {
-    const t = document.createElementNS(ns, 'text');
-    t.setAttribute('x', x.toFixed(1));
-    t.setAttribute('y', y.toFixed(1));
-    t.setAttribute('font-size', String(size));
-    t.setAttribute('font-family', 'Inter, sans-serif');
-    t.setAttribute('font-weight', weight);
-    t.setAttribute('fill', color);
-    t.setAttribute('text-anchor', anchor || 'middle');
-    t.setAttribute('dominant-baseline', 'middle');
-    t.setAttribute('stroke', 'white');
-    t.setAttribute('stroke-width', '2.5');
-    t.setAttribute('paint-order', 'stroke');
-    t.textContent = txt;
-    g.appendChild(t);
-  };
-
-  const labels = data.feature_labels || {};
-  const LABEL_R = RM + 15;
-  feats.forEach((f, i) => {
-    const a    = angle(i);
-    const lpos = polar(LABEL_R, a);
-    const cosA = Math.cos(a);
-    const anchor = Math.abs(cosA) < 0.3 ? 'middle' : (cosA > 0 ? 'start' : 'end');
-    const raw  = labels[f] || f;
-    const lbl  = raw.length > 11 ? raw.slice(0, 10) + '…' : raw;
-    mkSvgText(lbl, lpos.x, lpos.y, 7.5, '500', '#475569', anchor);
-  });
-
-  feats.forEach((f, i) => {
-    const a    = angle(i);
-    const vr   = valToR(shapVals[i]);
-    const vpos = polar(vr + 9, a);
-    const val  = shapVals[i];
-    const txt  = (val >= 0 ? '+' : '') + val.toFixed(1);
-    mkSvgText(txt, vpos.x, vpos.y, 7, '600', val >= 0 ? '#1d4ed8' : '#be123c', 'middle');
-  });
-
-  const yField = data.meta.y_field || (currentDS && currentDS.yField) || 'price';
-  const yVal   = p[yField];
-  if (yVal != null) {
-    const mkText = (txt, y, size, weight, color) => {
-      const t = document.createElementNS(ns, 'text');
-      t.setAttribute('x', '0');
-      t.setAttribute('y', y.toFixed(1));
-      t.setAttribute('font-size', String(size));
-      t.setAttribute('font-family', 'Inter, sans-serif');
-      t.setAttribute('font-weight', weight);
-      t.setAttribute('fill', color);
-      t.setAttribute('text-anchor', 'middle');
-      t.setAttribute('dominant-baseline', 'auto');
-      t.setAttribute('stroke', 'white');
-      t.setAttribute('stroke-width', '2.5');
-      t.setAttribute('paint-order', 'stroke');
-      t.textContent = txt;
-      g.appendChild(t);
-    };
-    mkText(currentDS ? currentDS.yLabel : yField, -RM - 34, 8.5, '500', '#64748b');
-    mkText(fmtY(yVal), -RM - 17, 13, '700', '#0f172a');
-  }
 }
 
 // ── Formatting helpers ───────────────────────────────────
