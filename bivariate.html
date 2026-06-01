@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GeoXCP | Bivariate + Radar</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -13,7 +13,7 @@
 
     #map { width: 100vw; height: 100vh; }
 
-    /* Full-map SVG overlay for radar + connector */
+    /* Full-map SVG overlay for radar + connector + focus ring */
     #radar-svg {
       position: absolute; top: 0; left: 0;
       width: 100%; height: 100%;
@@ -21,17 +21,7 @@
       z-index: 650;
       display: none;
     }
-    /* SVG `pointer-events: none` does NOT propagate to descendants by default —
-       radar dots/polygons would re-capture taps after the radar is drawn.
-       Force every child of #radar-svg to also be click-through. */
     #radar-svg * { pointer-events: none; }
-
-    /* Tap visual feedback on circleMarkers */
-    .leaflet-interactive.tap-flash {
-      stroke: #0f172a !important;
-      stroke-width: 3 !important;
-      transition: stroke-width 0.18s;
-    }
 
     /* ── Dataset selector ── */
     #ds-select {
@@ -157,11 +147,14 @@
       font-size: 13px;
     }
 
+    /* MapLibre attribution: keep small on mobile */
+    .maplibregl-ctrl-attrib { font-size: 10px; }
+
     /* ═════════════════ MOBILE (≤ 768px) ═════════════════ */
     @media (max-width: 768px) {
-      /* CSS fallback in case touch detection missed the device and Leaflet
-         still added the zoom buttons — they would overlap the ds-select. */
-      .leaflet-control-zoom { display: none !important; }
+      /* Hide built-in MapLibre nav button cluster on mobile (pinch-to-zoom is enough) */
+      .maplibregl-ctrl-top-right .maplibregl-ctrl-group,
+      .maplibregl-ctrl-top-left  .maplibregl-ctrl-group { display: none; }
 
       #ds-select {
         top: 10px; left: 10px;
@@ -195,7 +188,7 @@
       }
       .ip-title { font-size: 12px; margin-bottom: 0; flex: 1; }
       .ip-row { gap: 8px; margin-top: 2px; font-size: 10.5px; }
-      #ip-hint { display: none; }    /* Hint replaced by mode toggle bar on mobile */
+      #ip-hint { display: none; }
       #ip-focus-hint { font-size: 10.5px; }
 
       /* Bv legend: collapsible to a small chip */
@@ -205,9 +198,7 @@
         max-width: calc(100vw - 20px);
         transition: padding 0.2s;
       }
-      #bv-legend.collapsed {
-        padding: 6px 12px;
-      }
+      #bv-legend.collapsed { padding: 6px 12px; }
       #bv-legend.collapsed .bv-layout { display: none; }
       #bv-legend.collapsed .bv-legend-title {
         margin-bottom: 0;
@@ -235,11 +226,6 @@
       .bv-axis-y { height: calc(3 * 18px + 2 * 2px); font-size: 9.5px; }
       .bv-axis-x, .bv-axis-label, .bv-unc-label { font-size: 9.5px; }
       #mobile-mode-bar button { padding: 5px 10px; font-size: 11px; }
-    }
-
-    /* Larger tap target on touch devices for circleMarkers */
-    @media (hover: none) and (pointer: coarse) {
-      .leaflet-interactive { cursor: pointer; }
     }
   </style>
 </head>
@@ -293,11 +279,11 @@
   </div>
 </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script>
 // ╔══════════════════════════════════════════════════════╗
-// ║  GeoXCP · Bivariate Map + Hover Radar Chart          ║
+// ║  GeoXCP · Bivariate Map + Radar Chart (MapLibre GL)  ║
 // ╚══════════════════════════════════════════════════════╝
 
 // ── Platform hint ─────────────────────────────────────────
@@ -313,48 +299,33 @@ const DATASETS = [
 ];
 
 // ── Bivariate color scheme (Joshua Stevens · Blue × Purple) ─
-// BIVARIATE[shap_bin 0-2][unc_bin 0-2],  0=low 2=high
 const BIVARIATE = [
-  ['#e8e8e8', '#ace4e4', '#5ac8c8'],  // low  |SHAP|
-  ['#dfb0d6', '#a5add3', '#5698b9'],  // mid  |SHAP|
-  ['#be64ac', '#8c62aa', '#3b4994'],  // high |SHAP|
+  ['#e8e8e8', '#ace4e4', '#5ac8c8'],
+  ['#dfb0d6', '#a5add3', '#5698b9'],
+  ['#be64ac', '#8c62aa', '#3b4994'],
 ];
 
-// ── Hover radar sizing (computed dynamically in showRadar) ──
+// ── Radar sizing (set dynamically per viewport) ───────────
 let R_CHART  = 90;
 let R_PAD    = 50;
 let R_BOX    = R_CHART * 2 + R_PAD * 2;
 let CONN_GAP = 65;
 
-// ── Focus circle constants ────────────────────────────────
-const FOCUS_K  = 6;    // max points shown
-let   R_MINI   = 78;   // mini radar radius (px) — set per viewport in setRadarSizes()
-let   MINI_GAP = 32;   // gap: circle edge → mini radar edge
+// ── Focus mini-radar constants ────────────────────────────
+const FOCUS_K  = 6;
+let   R_MINI   = 78;
+let   MINI_GAP = 32;
 
-// ── Responsive sizing: shrink radar/mini-radar on small viewports ──
-// Call at the start of every show/render to keep sizes in sync with current viewport.
 function setRadarSizes() {
   const w = window.innerWidth;
-  if (w <= 420) {
-    R_CHART = 62;  R_PAD = 30;
-    R_MINI  = 42;  MINI_GAP = 10;
-  } else if (w <= 768) {
-    R_CHART = 80;  R_PAD = 40;
-    R_MINI  = 52;  MINI_GAP = 14;
-  } else if (w <= 1024) {
-    R_CHART = 100; R_PAD = 60;
-    R_MINI  = 66;  MINI_GAP = 24;
-  } else {
-    R_CHART = 115; R_PAD = 72;
-    R_MINI  = 78;  MINI_GAP = 32;
-  }
+  if (w <= 420)      { R_CHART = 62; R_PAD = 30; R_MINI = 42; MINI_GAP = 10; }
+  else if (w <= 768) { R_CHART = 80; R_PAD = 40; R_MINI = 52; MINI_GAP = 14; }
+  else if (w <= 1024){ R_CHART = 100; R_PAD = 60; R_MINI = 66; MINI_GAP = 24; }
+  else               { R_CHART = 115; R_PAD = 72; R_MINI = 78; MINI_GAP = 32; }
   R_BOX = R_CHART * 2 + R_PAD * 2;
 }
 function isMobileView() { return window.innerWidth <= 768; }
 
-// Robust touch detection — single-source-of-truth for tap-vs-hover branches.
-// Combines three signals because `pointer: coarse` alone misses some Android
-// browsers and phones with a paired Bluetooth mouse.
 function isTouchDevice() {
   if (window.matchMedia) {
     if (window.matchMedia('(pointer: coarse)').matches) return true;
@@ -363,30 +334,41 @@ function isTouchDevice() {
   return (navigator.maxTouchPoints || 0) > 0;
 }
 
-// Mobile interaction mode: 'radar' (single point) or 'focus' (top-K nearest)
+// Mobile interaction mode: 'radar' or 'focus'
 let mobileMode = 'radar';
 
 // ── State ────────────────────────────────────────────────
 let data       = null;
 let currentDS  = null;
-let leafletMap = null;
-let markers    = [];
-let pointStats = [];   // { point, avgShap, avgUnc, shapBin, uncBin, color }
+let map        = null;           // maplibregl.Map
+let mapReady   = false;          // becomes true after first 'load'
+let pointStats = [];
 
-// ── Focus circle state ────────────────────────────────────
-let focusCircle    = null;   // Leaflet Circle
-let focusCenter    = null;   // L.LatLng
-let focusPxRadius  = 80;     // fixed pixel radius (visually consistent across datasets)
-let focusClearTimer = null;  // timeout id for delayed clear
+// ── Focus state ──────────────────────────────────────────
+// MapLibre version: no Leaflet circle object — just track the centre and
+// re-render the dashed ring in SVG every time the map moves.
+let focusCenter = null;          // [lon, lat] or null
+let focusClearTimer = null;
 
-// Convert a fixed pixel radius to meters at the current map view
-function pxToMeters(pxR, latlng) {
-  const p1  = leafletMap.latLngToContainerPoint(latlng);
-  const ll2 = leafletMap.containerPointToLatLng(L.point(p1.x, p1.y - pxR));
-  return latlng.distanceTo(ll2);
+// ── Geometry helpers ─────────────────────────────────────
+// Haversine distance in meters between two [lon, lat] arrays
+function haversineDistance(p1, p2) {
+  const R = 6371000;
+  const toRad = d => d * Math.PI / 180;
+  const lat1 = toRad(p1[1]);
+  const lat2 = toRad(p2[1]);
+  const dLat = toRad(p2[1] - p1[1]);
+  const dLon = toRad(p2[0] - p1[0]);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+// Project [lon, lat] → container pixel {x, y}
+function projectLL(lonlat) {
+  const p = map.project(lonlat);
+  return { x: p.x, y: p.y };
 }
 
-// ── Bivariate legend ─────────────────────────────────────
+// ── Build bivariate legend grid ──────────────────────────
 function buildLegend() {
   const grid = document.getElementById('bv-grid');
   grid.innerHTML = '';
@@ -416,6 +398,18 @@ function loadDataset(ds) {
       s.onload = () => window[ds.varName] && setup(window[ds.varName], ds);
       document.head.appendChild(s);
     });
+}
+
+function buildGeoJSON() {
+  return {
+    type: 'FeatureCollection',
+    features: pointStats.map((ps, idx) => ({
+      type: 'Feature',
+      id: idx,
+      geometry: { type: 'Point', coordinates: [ps.point.lon, ps.point.lat] },
+      properties: { idx, color: ps.color },
+    })),
+  };
 }
 
 function setup(json, ds) {
@@ -451,179 +445,186 @@ function setup(json, ds) {
     ps.color   = BIVARIATE[ps.shapBin][ps.uncBin];
   });
 
-  // Init map once
-  if (!leafletMap) {
-    leafletMap = L.map('map', {
-      zoomControl: !isTouchDevice(),   // pinch-to-zoom is enough on touch; frees top-left for ds-select
-      attributionControl: true,
-      // Leaflet 1.x's tap polyfill is known to swallow circleMarker clicks on
-      // iOS Safari / Android Chrome. Modern browsers fire click on tap
-      // natively with no 300ms delay, so disabling the polyfill is safer.
-      tap: false,
-    });
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      attribution: '© <a href="https://www.openstreetmap.org/">OpenStreetMap</a> © <a href="https://carto.com/">CARTO</a>',
-      subdomains: 'abcd', maxZoom: 19,
-    }).addTo(leafletMap);
-
-    // Hide hover radar while panning; re-render focus radars after move
-    leafletMap.on('movestart zoomstart', () => {
-      if (!focusCircle) {
-        document.getElementById('radar-svg').style.display = 'none';
-      } else {
-        document.getElementById('radar-svg').style.display = 'none';
-      }
-    });
-    leafletMap.on('moveend zoomend', () => {
-      if (focusCircle) {
-        focusCircle.setRadius(pxToMeters(focusPxRadius, focusCenter));
-        renderFocusRadars();
-      }
-    });
-
-    // Regular click anywhere → dismiss focus circle
-    leafletMap.on('click', () => {
-      if (focusCircle) clearFocusCircle();
-      else hideRadar();
-    });
-
-    // Alt released or Escape → dismiss focus circle
-    document.addEventListener('keyup', e => {
-      if ((e.key === 'Alt' || e.key === 'Escape') && focusCircle) clearFocusCircle();
-    });
-
-    // (Scroll is no longer used to resize focus circle — size is set by K-th nearest point)
-  }
-
-  // Fit bounds
+  // Compute fit bounds
   const lats = testPoints.map(p => p.lat);
   const lons = testPoints.map(p => p.lon);
   const latMin = data.meta.lat_min ?? d3.min(lats);
   const latMax = data.meta.lat_max ?? d3.max(lats);
   const lonMin = data.meta.lon_min ?? d3.min(lons);
   const lonMax = data.meta.lon_max ?? d3.max(lons);
-  leafletMap.fitBounds([[latMin, lonMin], [latMax, lonMax]], { padding: [40, 40] });
 
-  renderMarkers();
+  if (!map) {
+    initMap([lonMin, latMin, lonMax, latMax]);
+    return;  // applySource() will run from map's 'load' callback below
+  }
+
+  if (mapReady) {
+    applySource();
+    map.fitBounds([[lonMin, latMin], [lonMax, latMax]], { padding: 40, animate: true });
+  } else {
+    // Map exists but not yet loaded; will run after 'load' fires
+    map.once('load', () => {
+      applySource();
+      map.fitBounds([[lonMin, latMin], [lonMax, latMax]], { padding: 40, animate: false });
+    });
+  }
 }
 
-// ── Render markers ───────────────────────────────────────
-function renderMarkers() {
-  markers.forEach(m => m.remove());
-  markers = [];
+// Build / update the points source & layer
+function applySource() {
+  const geojson = buildGeoJSON();
+  if (map.getSource('points')) {
+    map.getSource('points').setData(geojson);
+  } else {
+    map.addSource('points', { type: 'geojson', data: geojson, promoteId: 'idx' });
+    const isCoarse = isTouchDevice();
+    map.addLayer({
+      id: 'points-layer',
+      type: 'circle',
+      source: 'points',
+      paint: {
+        // Bigger radius on touch for tap accuracy
+        'circle-radius': isCoarse ? 9 : 5,
+        'circle-color': ['get', 'color'],
+        'circle-stroke-color': [
+          'case',
+          ['boolean', ['feature-state', 'flash'], false], '#0f172a',
+          'rgba(30,41,59,0.5)'
+        ],
+        'circle-stroke-width': [
+          'case',
+          ['boolean', ['feature-state', 'flash'], false], 3,
+          0.6
+        ],
+        'circle-opacity': 0.88,
+      },
+    });
+    wirePointEvents();
+  }
+}
 
-  // Larger marker radius on touch devices: 14px gives a ~28px hit area —
-  // much closer to Apple/Google's 44px tap-target guideline.
-  const isCoarse = isTouchDevice();
-  const baseR = isCoarse ? 14 : 5;
-  pointStats.forEach(ps => {
-    const p = ps.point;
-    const marker = L.circleMarker([p.lat, p.lon], {
-      radius: baseR,
-      fillColor: ps.color,
-      color: 'rgba(30,41,59,0.5)',
-      weight: 0.6,
-      opacity: 1,
-      fillOpacity: 0.88,
-    }).addTo(leafletMap);
+function initMap(bboxArr) {
+  map = new maplibregl.Map({
+    container: 'map',
+    style: 'https://tiles.openfreemap.org/styles/positron',
+    bounds: [[bboxArr[0], bboxArr[1]], [bboxArr[2], bboxArr[3]]],
+    fitBoundsOptions: { padding: 40 },
+    attributionControl: false,  // we add manually below to keep it compact
+  });
 
-    // ── Desktop (fine pointer): hover for radar, Alt+hover for focus ──
-    //    Touch devices (coarse pointer) skip these — some mobile browsers
-    //    dispatch a synthesised mouseover just before tap, which would
-    //    flash a radar before the real click handler runs.
-    marker.on('mouseover', e => {
-      if (isCoarse) return;
-      clearTimeout(focusClearTimer);
-      if (e.originalEvent && e.originalEvent.altKey) {
-        // Alt+hover → focus circle centered on this point
-        placeFocusCircle(L.latLng(p.lat, p.lon));
-      } else {
-        // Plain hover → single radar (clear focus if it was active)
-        if (focusCircle) clearFocusCircle();
-        showRadar(ps);
+  map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
+  if (!isTouchDevice()) {
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+  }
+
+  map.on('load', () => {
+    mapReady = true;
+    applySource();
+    // Map-level events
+    map.on('movestart', () => {
+      // Hide hover radar; focus radars re-render after move
+      if (!focusCenter) hideRadar();
+      else hideRadarKeepFocus();
+    });
+    map.on('moveend', () => {
+      if (focusCenter) renderFocusRadars();
+    });
+    map.on('click', e => {
+      // Clicks on point features are handled by the layer-specific click
+      // below — if we get here, it's a click on empty map area.
+      if (!e._handledByLayer) {
+        if (focusCenter) clearFocusCircle();
+        else hideRadar();
       }
     });
-    marker.on('mouseout', () => {
-      if (isCoarse) return;
-      if (focusCircle) {
-        // Brief delay so moving to an adjacent marker doesn't flicker
-        focusClearTimer = setTimeout(clearFocusCircle, 200);
-      } else {
-        hideRadar();
-      }
-    });
-    // ── Touch (coarse pointer): tap → current mobileMode (radar / focus) ──
-    //    On fine-pointer devices we let click bubble so the map's empty-area
-    //    click handler keeps its original "clear" semantics.
-    const handleTap = () => {
-      // Visual feedback first so user knows the tap registered, even if
-      // showRadar somehow throws later
-      const el = marker.getElement && marker.getElement();
-      if (el) {
-        el.classList.add('tap-flash');
-        setTimeout(() => el.classList.remove('tap-flash'), 220);
-      }
-      if (mobileMode === 'focus') {
-        placeFocusCircle(L.latLng(p.lat, p.lon));
-      } else {
-        if (focusCircle) clearFocusCircle();
-        showRadar(ps);
-      }
-    };
+  });
 
-    marker.on('click', e => {
-      if (!isCoarse) return;  // desktop: don't override original click→clear
-      handleTap();
-      if (e.originalEvent) L.DomEvent.stop(e.originalEvent);
-    });
-
-    // Native fallback: bind click + touchend directly on the marker's SVG
-    // path. Leaflet's marker click event is sometimes swallowed by gesture
-    // detection on iOS Safari / Android Chrome — these listeners run even
-    // when Leaflet's event doesn't fire.
-    if (isCoarse) {
-      const attachNativeFallback = () => {
-        const el = marker.getElement && marker.getElement();
-        if (!el || el.__bvTapBound) return;
-        el.__bvTapBound = true;
-        let touchHandled = false;
-        el.addEventListener('touchend', ev => {
-          touchHandled = true;
-          ev.preventDefault();
-          ev.stopPropagation();
-          handleTap();
-          // Reset the flag a tick later so a real click (not from this tap)
-          // can still come through if it's the first interaction.
-          setTimeout(() => { touchHandled = false; }, 400);
-        }, { passive: false });
-        el.addEventListener('click', ev => {
-          if (touchHandled) return;  // already handled via touchend
-          ev.stopPropagation();
-          handleTap();
-        });
-      };
-      // getElement() may return null until the marker is added to the map;
-      // a microtask later it's available.
-      attachNativeFallback();
-      setTimeout(attachNativeFallback, 0);
-    }
-
-    markers.push(marker);
+  document.addEventListener('keyup', e => {
+    if ((e.key === 'Alt' || e.key === 'Escape') && focusCenter) clearFocusCircle();
   });
 }
 
-// ── Radar: hide (hover mode) ──────────────────────────────
-function hideRadar() {
-  if (focusCircle) return; // don't clear focus radars
-  document.getElementById('radar-svg').style.display = 'none';
+// ── Wire click / hover handlers on the points layer ──────
+function wirePointEvents() {
+  let hoverIdx = null;
+
+  map.on('click', 'points-layer', e => {
+    if (!e.features || !e.features.length) return;
+    e._handledByLayer = true;  // tell the empty-area click handler to skip
+    if (e.originalEvent) e.originalEvent.preventDefault?.();
+    const idx = e.features[0].id;
+    const ps  = pointStats[idx];
+
+    // Flash visual feedback via feature-state
+    map.setFeatureState({ source: 'points', id: idx }, { flash: true });
+    setTimeout(() => map.setFeatureState({ source: 'points', id: idx }, { flash: false }), 220);
+
+    if (isTouchDevice()) {
+      if (mobileMode === 'focus') {
+        placeFocusCircle([ps.point.lon, ps.point.lat]);
+      } else {
+        if (focusCenter) clearFocusCircle();
+        showRadar(ps);
+      }
+    } else {
+      // Desktop click: same as hover (show radar). Alt-click → focus.
+      if (e.originalEvent && e.originalEvent.altKey) {
+        placeFocusCircle([ps.point.lon, ps.point.lat]);
+      } else {
+        if (focusCenter) clearFocusCircle();
+        showRadar(ps);
+      }
+    }
+  });
+
+  // Cursor + hover-radar on desktop
+  map.on('mousemove', 'points-layer', e => {
+    if (isTouchDevice()) return;
+    if (!e.features || !e.features.length) return;
+    map.getCanvas().style.cursor = 'pointer';
+    const idx = e.features[0].id;
+    if (idx === hoverIdx) return;
+    hoverIdx = idx;
+    clearTimeout(focusClearTimer);
+    const ps = pointStats[idx];
+    if (e.originalEvent && e.originalEvent.altKey) {
+      placeFocusCircle([ps.point.lon, ps.point.lat]);
+    } else {
+      if (focusCenter) clearFocusCircle();
+      showRadar(ps);
+    }
+  });
+  map.on('mouseleave', 'points-layer', () => {
+    if (isTouchDevice()) return;
+    map.getCanvas().style.cursor = '';
+    hoverIdx = null;
+    if (focusCenter) {
+      focusClearTimer = setTimeout(clearFocusCircle, 200);
+    } else {
+      hideRadar();
+    }
+  });
 }
 
-// ── Radar: show single hover radar ───────────────────────
+// ── Radar visibility ──────────────────────────────────────
+function hideRadar() {
+  if (focusCenter) return;
+  const svg = document.getElementById('radar-svg');
+  svg.style.display = 'none';
+  svg.innerHTML = '';
+}
+function hideRadarKeepFocus() {
+  // Used during pan: clear visuals briefly while moving
+  const svg = document.getElementById('radar-svg');
+  svg.innerHTML = '';
+}
+
+// ── Show single hover/tap radar ───────────────────────────
 function showRadar(ps) {
-  if (focusCircle) return; // hover disabled during focus mode
+  if (focusCenter) return;
   const p   = ps.point;
   const svg = document.getElementById('radar-svg');
-  const con = leafletMap.getContainer();
+  const con = map.getContainer();
   const mapW = con.offsetWidth;
   const mapH = con.offsetHeight;
 
@@ -632,18 +633,16 @@ function showRadar(ps) {
     ? Math.round(Math.min(mapW * 0.05, 40))
     : Math.round(Math.min(mapW * 0.08, 120));
 
-  const px = leafletMap.latLngToContainerPoint([p.lat, p.lon]);
+  const px = projectLL([p.lon, p.lat]);
 
-  // Count map points overlapping a candidate radar box (cx,cy) with size R_BOX×R_BOX
   const countOverlap = (cx, cy) => {
     const hw = R_BOX / 2, hh = R_BOX / 2;
-    return pointStats.filter(ps => {
-      const q = leafletMap.latLngToContainerPoint(L.latLng(ps.point.lat, ps.point.lon));
+    return pointStats.filter(ps2 => {
+      const q = projectLL([ps2.point.lon, ps2.point.lat]);
       return q.x >= cx - hw && q.x <= cx + hw && q.y >= cy - hh && q.y <= cy + hh;
     }).length;
   };
 
-  // Generate candidates: both sides × vertical offsets
   const vOffsets = [0, -80, 80, -160, 160];
   const candidates = [];
   for (const s of ['right', 'left']) {
@@ -655,10 +654,9 @@ function showRadar(ps) {
       candidates.push({ side: s, cx: cx0, cy: cy0, score: countOverlap(cx0, cy0) });
     }
   }
-  // Pick candidate with fewest overlapping points; break ties by preferring more space
   candidates.sort((a, b) => a.score - b.score || Math.abs(a.cy - px.y) - Math.abs(b.cy - px.y));
   const best = candidates[0];
-  const side   = best.side;
+  const side    = best.side;
   const radarCx = best.cx;
   const radarCy = best.cy;
 
@@ -673,13 +671,6 @@ function showRadar(ps) {
   svg.setAttribute('viewBox', `0 0 ${mapW} ${mapH}`);
   svg.setAttribute('width',  mapW);
   svg.setAttribute('height', mapH);
-
-  const defs = document.createElementNS(ns, 'defs');
-  defs.innerHTML = `
-    <filter id="dshadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="rgba(0,0,0,0.15)"/>
-    </filter>`;
-  svg.appendChild(defs);
 
   // Elbow connector
   const conn = document.createElementNS(ns, 'polyline');
@@ -732,7 +723,6 @@ function drawRadar(g, ns, ps) {
   const angle  = i => (i / n) * 2 * Math.PI - Math.PI / 2;
   const polar  = (r, a) => ({ x: r * Math.cos(a), y: r * Math.sin(a) });
 
-  // Grid rings
   [0.25, 0.5, 0.75, 1.0].forEach(t => {
     const el = document.createElementNS(ns, 'circle');
     el.setAttribute('cx', 0); el.setAttribute('cy', 0);
@@ -743,7 +733,6 @@ function drawRadar(g, ns, ps) {
     g.appendChild(el);
   });
 
-  // Zero-reference (orange dashed)
   const zeroEl = document.createElementNS(ns, 'circle');
   zeroEl.setAttribute('cx', 0); zeroEl.setAttribute('cy', 0);
   zeroEl.setAttribute('r', valToR(0).toFixed(1));
@@ -753,7 +742,6 @@ function drawRadar(g, ns, ps) {
   zeroEl.setAttribute('stroke-dasharray', '4,3');
   g.appendChild(zeroEl);
 
-  // Axis lines
   feats.forEach((_, i) => {
     const end = polar(R_CHART, angle(i));
     const line = document.createElementNS(ns, 'line');
@@ -764,7 +752,6 @@ function drawRadar(g, ns, ps) {
     g.appendChild(line);
   });
 
-  // Uncertainty band (evenodd)
   const upperPts  = feats.map((f, i) => polar(valToR(upperVals[i]), angle(i)));
   const lowerPts  = feats.map((f, i) => polar(Math.max(0, valToR(lowerVals[i])), angle(i)));
   const ptStr     = pts => pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
@@ -778,7 +765,6 @@ function drawRadar(g, ns, ps) {
   band.setAttribute('stroke', 'none');
   g.appendChild(band);
 
-  // SHAP polygon
   const shapPts = feats.map((f, i) => polar(valToR(shapVals[i]), angle(i)));
   const shapPoly = document.createElementNS(ns, 'polygon');
   shapPoly.setAttribute('points', ptStr(shapPts));
@@ -799,7 +785,6 @@ function drawRadar(g, ns, ps) {
     g.appendChild(dot);
   });
 
-  // Feature labels (font-sizes shrink on mobile to match smaller R_CHART)
   const mob       = isMobileView();
   const FS_LABEL  = mob ? '8.5' : '9.5';
   const FS_SCALE  = mob ? '8'   : '9';
@@ -836,7 +821,6 @@ function drawRadar(g, ns, ps) {
     g.appendChild(text);
   });
 
-  // Scale labels
   const scaleVals = [absMax * 0.5, 0, -absMax * 0.5];
   scaleVals.forEach(v => {
     const r    = valToR(v);
@@ -854,7 +838,6 @@ function drawRadar(g, ns, ps) {
     g.appendChild(text);
   });
 
-  // Title: y-value
   const yField = data.meta.y_field || (currentDS && currentDS.yField) || 'price';
   const yVal   = p[yField];
   const yStr   = yVal != null ? fmtY(yVal) : '—';
@@ -876,7 +859,6 @@ function drawRadar(g, ns, ps) {
     g.appendChild(t);
   });
 
-  // Subtitle
   const subText = `Avg|SHAP| ${ps.avgShap.toFixed(1)}  ·  Avg Unc ±${ps.avgUnc.toFixed(1)}`;
   [['white','3',null], ['#334155','0','#334155']].forEach(([stroke, sw, fill]) => {
     const t = document.createElementNS(ns, 'text');
@@ -894,60 +876,42 @@ function drawRadar(g, ns, ps) {
   });
 }
 
-// ── Focus circle: clear ───────────────────────────────────
+// ── Focus circle: clear ──────────────────────────────────
 function clearFocusCircle() {
-  if (focusCircle) {
-    focusCircle.remove();
-    focusCircle = null;
-    focusCenter = null;
-    leafletMap && leafletMap.scrollWheelZoom.enable();
-  }
+  focusCenter = null;
   const svg = document.getElementById('radar-svg');
   if (svg) { svg.style.display = 'none'; svg.innerHTML = ''; }
-  document.getElementById('ip-focus-hint').style.display = 'none';
+  const fh = document.getElementById('ip-focus-hint');
+  if (fh) fh.style.display = 'none';
 }
 
-// ── Focus circle: place / move ────────────────────────────
-function placeFocusCircle(latlng) {
-  focusCenter = latlng;
-  if (!focusCircle) {
-    focusCircle = L.circle(latlng, {
-      radius:      1,  // placeholder; renderFocusRadars sets real radius from K-th point
-      color:       '#3b82f6',
-      weight:      2,
-      fillColor:   '#3b82f6',
-      fillOpacity: 0.05,
-      dashArray:   '6,4',
-      interactive: false,
-    }).addTo(leafletMap);
-    leafletMap.scrollWheelZoom.disable(); // scroll now controls radius
-  } else {
-    focusCircle.setLatLng(latlng);
-  }
+// ── Focus circle: place / move ───────────────────────────
+function placeFocusCircle(lonlat) {
+  focusCenter = lonlat;  // [lon, lat]
   document.getElementById('ip-focus-hint').style.display = 'block';
   renderFocusRadars();
 }
 
-// ── Get K nearest points (always K closest, circle is visual only) ──────────
+// ── Get K nearest points ─────────────────────────────────
 function getPointsInCircle() {
   if (!focusCenter) return [];
   return pointStats
     .slice()
     .sort((a, b) =>
-      focusCenter.distanceTo(L.latLng(a.point.lat, a.point.lon)) -
-      focusCenter.distanceTo(L.latLng(b.point.lat, b.point.lon))
+      haversineDistance(focusCenter, [a.point.lon, a.point.lat]) -
+      haversineDistance(focusCenter, [b.point.lon, b.point.lat])
     )
     .slice(0, FOCUS_K);
 }
 
-// ── Render all focus mini radars ──────────────────────────
+// ── Render focus ring + K mini radars ────────────────────
 function renderFocusRadars() {
-  if (!focusCenter || !focusCircle) return;
+  if (!focusCenter) return;
   setRadarSizes();
   const inCircle = getPointsInCircle();
 
   const svg  = document.getElementById('radar-svg');
-  const con  = leafletMap.getContainer();
+  const con  = map.getContainer();
   const mapW = con.offsetWidth;
   const mapH = con.offsetHeight;
   const ns   = 'http://www.w3.org/2000/svg';
@@ -960,44 +924,44 @@ function renderFocusRadars() {
 
   if (inCircle.length === 0) return;
 
-  // Resize circle to exactly enclose the K-th nearest point
-  const kthPt = inCircle[inCircle.length - 1].point;
-  const kthDist = focusCenter.distanceTo(L.latLng(kthPt.lat, kthPt.lon));
-  focusCircle.setRadius(kthDist * 1.08);  // slight padding so K-th point sits inside edge
+  // Pixel center
+  const cx0 = projectLL(focusCenter);
 
-  // Pixel center of focus point
-  const cx0 = leafletMap.latLngToContainerPoint(focusCenter);
-  // pxRadius = farthest pixel distance among the K selected points (so radars sit just outside)
+  // pxRadius = farthest pixel distance among the K selected points
   const pxRadius = Math.max(30, ...inCircle.map(ps => {
-    const ptPx = leafletMap.latLngToContainerPoint(L.latLng(ps.point.lat, ps.point.lon));
+    const ptPx = projectLL([ps.point.lon, ps.point.lat]);
     return Math.hypot(ptPx.x - cx0.x, ptPx.y - cx0.y);
   }));
 
-  // ── Angular spreading: guaranteed no overlap ──────────────
-  // min center-to-center distance: disk diameter + label height (label sits outside disk)
+  // Draw dashed focus ring (replacement for the old L.circle)
+  const ring = document.createElementNS(ns, 'circle');
+  ring.setAttribute('cx', cx0.x.toFixed(1));
+  ring.setAttribute('cy', cx0.y.toFixed(1));
+  ring.setAttribute('r',  (pxRadius * 1.08).toFixed(1));
+  ring.setAttribute('fill', 'rgba(59,130,246,0.05)');
+  ring.setAttribute('stroke', '#3b82f6');
+  ring.setAttribute('stroke-width', '2');
+  ring.setAttribute('stroke-dasharray', '6,4');
+  svg.appendChild(ring);
+
+  // Angular spreading
   const labelPad = isMobileView() ? 36 : 80;
-  const minSep = (R_MINI + 5) * 2 + labelPad;  // covers disk + feature labels extending outward
-  const n = inCircle.length;
-
-  // Ensure placeDist is large enough for all n radars to fit on the ring
-  // (circumradius of regular n-gon with side = minSep)
+  const minSep   = (R_MINI + 5) * 2 + labelPad;
+  const n        = inCircle.length;
   const minPlaceDist = n > 1 ? minSep / (2 * Math.sin(Math.PI / n)) : 0;
-  const placeDist = Math.max(pxRadius + MINI_GAP + R_MINI, minPlaceDist);
+  const placeDist    = Math.max(pxRadius + MINI_GAP + R_MINI, minPlaceDist);
 
-  // Compute initial angle toward each data point from circle center
   const entries = inCircle.map(ps => {
-    const ptPx = leafletMap.latLngToContainerPoint([ps.point.lat, ps.point.lon]);
+    const ptPx = projectLL([ps.point.lon, ps.point.lat]);
     const dx = ptPx.x - cx0.x, dy = ptPx.y - cx0.y;
     let ang = Math.atan2(dy || -1, dx);
-    if (ang < 0) ang += 2 * Math.PI;  // normalize to [0, 2π)
+    if (ang < 0) ang += 2 * Math.PI;
     return { ang, ps, ptPx };
   });
   entries.sort((a, b) => a.ang - b.ang);
 
-  // Minimum angular gap to keep radars minSep apart on the ring
   const minAngGap = 2 * Math.asin(Math.min(0.9999, minSep / (2 * placeDist)));
 
-  // Find the largest circular gap → start ordering after it (avoids wrap-around issues)
   let startIdx = 0, maxGap = 0;
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
@@ -1005,12 +969,10 @@ function renderFocusRadars() {
     if (gap > maxGap) { maxGap = gap; startIdx = j; }
   }
   const ord = [...entries.slice(startIdx), ...entries.slice(0, startIdx)];
-  // Unwrap angles so the sequence is strictly increasing
   for (let i = 1; i < n; i++) {
     while (ord[i].ang <= ord[i - 1].ang) ord[i].ang += 2 * Math.PI;
   }
 
-  // Iteratively push adjacent angles apart (linear — no wrap needed after reordering)
   for (let iter = 0; iter < 300; iter++) {
     let moved = false;
     for (let i = 0; i < n - 1; i++) {
@@ -1025,8 +987,7 @@ function renderFocusRadars() {
     if (!moved) break;
   }
 
-  // Convert final angles → Cartesian positions, clamp to viewport
-  const PAD = R_MINI + (isMobileView() ? 14 : 30);  // extra room for feature labels outside disk
+  const PAD = R_MINI + (isMobileView() ? 14 : 30);
   const positions = ord.map(e => {
     let x = cx0.x + Math.cos(e.ang) * placeDist;
     let y = cx0.y + Math.sin(e.ang) * placeDist;
@@ -1035,8 +996,6 @@ function renderFocusRadars() {
     return { x, y, ps: e.ps, ptPx: e.ptPx };
   });
 
-  // ── Final Cartesian repulsion pass ────────────────────────
-  // Viewport clamping above can pull radars back together; fix any residual overlaps
   for (let iter = 0; iter < 80; iter++) {
     let moved = false;
     for (let i = 0; i < positions.length; i++) {
@@ -1058,8 +1017,8 @@ function renderFocusRadars() {
     if (!moved) break;
   }
 
-  // ── Draw elbow connector lines (horizontal stub → radar center) ──
-  const STUB = isMobileView() ? 14 : 32;  // horizontal stub length in px
+  // Elbow connectors
+  const STUB = isMobileView() ? 14 : 32;
   positions.forEach(pos => {
     const stubX = pos.ptPx.x + (pos.x >= pos.ptPx.x ? STUB : -STUB);
     const conn = document.createElementNS(ns, 'polyline');
@@ -1077,7 +1036,6 @@ function renderFocusRadars() {
     svg.appendChild(conn);
   });
 
-  // ── Point highlight dots ──
   positions.forEach(pos => {
     const dot = document.createElementNS(ns, 'circle');
     dot.setAttribute('cx', pos.ptPx.x.toFixed(1));
@@ -1089,7 +1047,6 @@ function renderFocusRadars() {
     svg.appendChild(dot);
   });
 
-  // ── Draw mini radars on top ──
   positions.forEach(pos => {
     const g = document.createElementNS(ns, 'g');
     g.setAttribute('transform', `translate(${pos.x.toFixed(1)},${pos.y.toFixed(1)})`);
@@ -1098,7 +1055,7 @@ function renderFocusRadars() {
   });
 }
 
-// ── Draw mini radar (compact, no axis labels) ─────────────
+// ── Mini radar (compact, no axis labels) ─────────────────
 function drawMiniRadar(g, ns, ps) {
   const p     = ps.point;
   const feats = data.features;
@@ -1120,7 +1077,6 @@ function drawMiniRadar(g, ns, ps) {
   const angle  = i => (i / n) * 2 * Math.PI - Math.PI / 2;
   const polar  = (r, a) => ({ x: r * Math.cos(a), y: r * Math.sin(a) });
 
-  // Frosted glass background disk
   const bg = document.createElementNS(ns, 'circle');
   bg.setAttribute('cx', 0); bg.setAttribute('cy', 0);
   bg.setAttribute('r', (RM + 8).toFixed(1));
@@ -1129,7 +1085,6 @@ function drawMiniRadar(g, ns, ps) {
   bg.setAttribute('stroke-width', '2');
   g.appendChild(bg);
 
-  // Grid rings
   [0.5, 1.0].forEach(t => {
     const el = document.createElementNS(ns, 'circle');
     el.setAttribute('cx', 0); el.setAttribute('cy', 0);
@@ -1140,7 +1095,6 @@ function drawMiniRadar(g, ns, ps) {
     g.appendChild(el);
   });
 
-  // Zero-reference (orange dashed)
   const zeroEl = document.createElementNS(ns, 'circle');
   zeroEl.setAttribute('cx', 0); zeroEl.setAttribute('cy', 0);
   zeroEl.setAttribute('r', valToR(0).toFixed(1));
@@ -1150,7 +1104,6 @@ function drawMiniRadar(g, ns, ps) {
   zeroEl.setAttribute('stroke-dasharray', '3,2');
   g.appendChild(zeroEl);
 
-  // Axis lines
   feats.forEach((_, i) => {
     const end = polar(RM, angle(i));
     const ln  = document.createElementNS(ns, 'line');
@@ -1161,7 +1114,6 @@ function drawMiniRadar(g, ns, ps) {
     g.appendChild(ln);
   });
 
-  // Uncertainty band
   const upperPts  = feats.map((f, i) => polar(valToR(upperVals[i]), angle(i)));
   const lowerPts  = feats.map((f, i) => polar(Math.max(0, valToR(lowerVals[i])), angle(i)));
   const upperPath = upperPts.map((p, i) => `${i===0?'M':'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') + ' Z';
@@ -1173,7 +1125,6 @@ function drawMiniRadar(g, ns, ps) {
   band.setAttribute('stroke', 'none');
   g.appendChild(band);
 
-  // SHAP polygon
   const shapPts = feats.map((f, i) => polar(valToR(shapVals[i]), angle(i)));
   const ptStr   = pts => pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
   const shapPoly = document.createElementNS(ns, 'polygon');
@@ -1184,7 +1135,6 @@ function drawMiniRadar(g, ns, ps) {
   shapPoly.setAttribute('stroke-linejoin', 'round');
   g.appendChild(shapPoly);
 
-  // Helper: halo text
   const mkSvgText = (txt, x, y, size, weight, color, anchor) => {
     const t = document.createElementNS(ns, 'text');
     t.setAttribute('x', x.toFixed(1));
@@ -1202,7 +1152,6 @@ function drawMiniRadar(g, ns, ps) {
     g.appendChild(t);
   };
 
-  // Feature labels around perimeter
   const labels = data.feature_labels || {};
   const LABEL_R = RM + 15;
   feats.forEach((f, i) => {
@@ -1211,22 +1160,19 @@ function drawMiniRadar(g, ns, ps) {
     const cosA = Math.cos(a);
     const anchor = Math.abs(cosA) < 0.3 ? 'middle' : (cosA > 0 ? 'start' : 'end');
     const raw  = labels[f] || f;
-    // Abbreviate to 10 chars max
     const lbl  = raw.length > 11 ? raw.slice(0, 10) + '…' : raw;
     mkSvgText(lbl, lpos.x, lpos.y, 7.5, '500', '#475569', anchor);
   });
 
-  // SHAP value at each vertex
   feats.forEach((f, i) => {
     const a    = angle(i);
     const vr   = valToR(shapVals[i]);
-    const vpos = polar(vr + 9, a);  // slightly outside the vertex dot
+    const vpos = polar(vr + 9, a);
     const val  = shapVals[i];
     const txt  = (val >= 0 ? '+' : '') + val.toFixed(1);
     mkSvgText(txt, vpos.x, vpos.y, 7, '600', val >= 0 ? '#1d4ed8' : '#be123c', 'middle');
   });
 
-  // Label above the disk: field name (small) + value (large)
   const yField = data.meta.y_field || (currentDS && currentDS.yField) || 'price';
   const yVal   = p[yField];
   if (yVal != null) {
@@ -1246,9 +1192,7 @@ function drawMiniRadar(g, ns, ps) {
       t.textContent = txt;
       g.appendChild(t);
     };
-    // Field label (e.g. "House Price") above value
     mkText(currentDS ? currentDS.yLabel : yField, -RM - 34, 8.5, '500', '#64748b');
-    // Formatted value (e.g. "$450k") closer to disk
     mkText(fmtY(yVal), -RM - 17, 13, '700', '#0f172a');
   }
 }
@@ -1278,14 +1222,11 @@ DATASETS.forEach((ds, i) => {
   dsSel.appendChild(opt);
 });
 dsSel.addEventListener('change', e => {
-  markers.forEach(m => m.remove());
-  markers = [];
   loadDataset(DATASETS[+e.target.value]);
 });
 
 // ── Mobile mode toggle & collapsible panels ──────────────
 (function () {
-  // Mode toggle: switch tap behaviour between radar / focus
   const modeRadar = document.getElementById('mode-radar-btn');
   const modeFocus = document.getElementById('mode-focus-btn');
   const modeClear = document.getElementById('mode-clear-btn');
@@ -1297,36 +1238,30 @@ dsSel.addEventListener('change', e => {
       b.classList.toggle('active', on);
       b.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
-    // Switching mode clears the current display
-    if (focusCircle) clearFocusCircle();
+    if (focusCenter) clearFocusCircle();
     else hideRadar();
   }
   modeRadar.addEventListener('click', () => setMode('radar'));
   modeFocus.addEventListener('click', () => setMode('focus'));
   modeClear.addEventListener('click', () => {
-    if (focusCircle) clearFocusCircle();
+    if (focusCenter) clearFocusCircle();
     else hideRadar();
   });
 
-  // Collapsible info panel
   const ipPanel = document.getElementById('info-panel');
   const ipBtn   = document.getElementById('info-collapse');
   if (ipBtn) {
-    // Start collapsed on small screens to free map space
     if (window.innerWidth <= 768) ipPanel.classList.add('collapsed');
     ipBtn.addEventListener('click', () => ipPanel.classList.toggle('collapsed'));
-    // Tap header (not just chevron) to expand when collapsed
     ipPanel.querySelector('.ip-header').addEventListener('click', e => {
       if (e.target === ipBtn) return;
       if (ipPanel.classList.contains('collapsed')) ipPanel.classList.remove('collapsed');
     });
   }
 
-  // Collapsible bivariate legend
   const bvLegend = document.getElementById('bv-legend');
   const lgBtn    = document.getElementById('legend-collapse');
   if (lgBtn) {
-    // Start collapsed on small screens
     if (window.innerWidth <= 768) bvLegend.classList.add('collapsed');
     lgBtn.addEventListener('click', e => {
       e.stopPropagation();
@@ -1338,23 +1273,24 @@ dsSel.addEventListener('change', e => {
     });
   }
 
-  // Don't let panel/toggle clicks bubble into the Leaflet map
+  // Prevent panel clicks/scrolls from triggering map interactions.
+  // MapLibre listens on the canvas; stopping propagation at the panel root
+  // is enough since panels live above the canvas in the DOM.
   ['mobile-mode-bar', 'info-panel', 'bv-legend', 'ds-select'].forEach(id => {
     const el = document.getElementById(id);
-    if (el && window.L) {
-      L.DomEvent.disableClickPropagation(el);
-      L.DomEvent.disableScrollPropagation(el);
-    }
+    if (!el) return;
+    ['click', 'mousedown', 'touchstart', 'pointerdown', 'wheel'].forEach(ev => {
+      el.addEventListener(ev, e => e.stopPropagation(), { passive: true });
+    });
   });
 
-  // Viewport changes (rotation, resize): re-render any active radar
+  // Viewport changes (rotation, resize)
   let _rsT = null;
   window.addEventListener('resize', () => {
-    if (leafletMap) leafletMap.invalidateSize();
+    if (map) map.resize();
     clearTimeout(_rsT);
     _rsT = setTimeout(() => {
-      if (focusCircle) renderFocusRadars();
-      // Single hover radar can't easily be re-shown without state; just hide it
+      if (focusCenter) renderFocusRadars();
       else { const s = document.getElementById('radar-svg'); if (s) s.style.display = 'none'; }
     }, 150);
   });
