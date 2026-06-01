@@ -679,12 +679,165 @@
       font-family: 'Monaco', 'Menlo', monospace;
       font-size: 13px;
     }
+
+    /* ── MOBILE MENU BUTTON (hidden on desktop) ── */
+    .mobile-menu-btn {
+      display: none;
+      width: 38px; height: 38px;
+      background: transparent;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      cursor: pointer;
+      flex-shrink: 0;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      padding: 0;
+    }
+    .mobile-menu-btn span {
+      display: block;
+      width: 18px;
+      height: 2px;
+      background: #e2e8f0;
+      border-radius: 1px;
+      transition: transform 0.2s, opacity 0.2s;
+    }
+    body.sidebar-open .mobile-menu-btn span:nth-child(1) {
+      transform: translateY(6px) rotate(45deg);
+    }
+    body.sidebar-open .mobile-menu-btn span:nth-child(2) { opacity: 0; }
+    body.sidebar-open .mobile-menu-btn span:nth-child(3) {
+      transform: translateY(-6px) rotate(-45deg);
+    }
+
+    .sidebar-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.45);
+      z-index: 998;
+    }
+    body.sidebar-open .sidebar-backdrop { display: block; }
+
+    /* ═════════════════════ TABLET (≤ 1024px) ═════════════════════ */
+    @media (max-width: 1024px) {
+      :root {
+        --sidebar-w: 280px;
+        --bottom-h: 220px;
+      }
+      .header-subtitle { display: none; }
+      .feature-select { min-width: 130px; }
+    }
+
+    /* ═════════════════════ MOBILE (≤ 768px) ═════════════════════ */
+    @media (max-width: 768px) {
+      :root {
+        --header-h: 56px;
+        --bottom-h: 200px;
+        --controls-h: auto;
+      }
+
+      body { font-size: 12px; }
+
+      /* Header */
+      .site-header {
+        padding: 0 12px;
+        gap: 10px;
+      }
+      .mobile-menu-btn { display: flex; }
+      .header-logo { gap: 8px; min-width: 0; flex: 1; }
+      .header-title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
+      .logo-badge { font-size: 11px; padding: 4px 8px; }
+      .header-sep { display: none; }
+      .header-tags { display: none; }
+      .ds-select { font-size: 11px; padding: 4px 8px; max-width: 140px; }
+
+      /* Body: switch to single column; sidebar becomes off-canvas drawer */
+      .app-body {
+        grid-template-columns: 1fr;
+        position: relative;
+      }
+      .sidebar {
+        position: fixed;
+        top: var(--header-h);
+        left: 0;
+        bottom: 0;
+        width: min(85vw, 320px);
+        z-index: 999;
+        transform: translateX(-100%);
+        transition: transform 0.25s ease;
+        box-shadow: 4px 0 16px rgba(0,0,0,0.15);
+        border-right: 1px solid var(--border);
+      }
+      body.sidebar-open .sidebar { transform: translateX(0); }
+
+      /* Map controls: wrap onto two rows, larger tap targets */
+      .map-controls {
+        height: auto;
+        min-height: 48px;
+        padding: 8px 10px;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .control-group { gap: 6px; }
+      .control-label { font-size: 10.5px; }
+      .feature-select {
+        min-width: 120px;
+        padding: 7px 26px 7px 10px;
+        font-size: 12px;
+      }
+      .metric-btn { padding: 7px 10px; font-size: 11px; }
+      .controls-spacer { display: none; }
+      .point-info-badge {
+        font-size: 10.5px;
+        padding: 4px 8px;
+        flex-basis: 100%;
+        justify-content: center;
+      }
+
+      /* Legend: compact + wrap */
+      .map-legend {
+        height: auto;
+        min-height: 40px;
+        padding: 6px 10px;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .legend-title { font-size: 10px; }
+      #legend-gradient-svg { min-width: 120px; max-width: 100%; }
+      .legend-sep { display: none; }
+      .legend-size-wrap { display: none; }
+
+      /* Bottom panel */
+      .bottom-panel { height: var(--bottom-h); }
+      .bottom-tabs { padding: 0 8px; height: 38px; }
+      .tab-btn { padding: 0 10px 7px; font-size: 11.5px; }
+      .chart-pane { padding: 8px 10px 6px; }
+
+      /* No data overlay */
+      .no-data-title { font-size: 16px; }
+      .no-data-desc { font-size: 12px; }
+      .no-data-code { font-size: 11px; padding: 8px 12px; }
+    }
+
+    /* ═════════════════════ SMALL MOBILE (≤ 420px) ═════════════════════ */
+    @media (max-width: 420px) {
+      .header-title { font-size: 12px; }
+      .ds-select { max-width: 110px; font-size: 10.5px; }
+      .metric-btn { padding: 6px 8px; font-size: 10.5px; }
+      .feature-select { min-width: 110px; }
+      :root { --bottom-h: 180px; }
+    }
   </style>
 </head>
 <body>
 
 <!-- ═══════════════════════ HEADER ═══════════════════════ -->
 <header class="site-header">
+  <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Toggle sidebar" aria-expanded="false">
+    <span></span><span></span><span></span>
+  </button>
   <div class="header-logo">
     <span class="logo-badge">GeoXCP</span>
     <div>
@@ -705,6 +858,7 @@
 </header>
 
 <!-- ═══════════════════════ MAIN BODY ═══════════════════════ -->
+<div class="sidebar-backdrop" id="sidebar-backdrop"></div>
 <div class="app-body">
 
   <!-- ─── LEFT SIDEBAR ─── -->
@@ -985,6 +1139,28 @@
 // ║              GeoXCP Interactive Application              ║
 // ╚══════════════════════════════════════════════════════════╝
 
+// ── Mobile sidebar toggle ──────────────────────────────────
+(function () {
+  const btn = document.getElementById('mobile-menu-btn');
+  const backdrop = document.getElementById('sidebar-backdrop');
+  const close = () => {
+    document.body.classList.remove('sidebar-open');
+    btn.setAttribute('aria-expanded', 'false');
+  };
+  if (btn) {
+    btn.addEventListener('click', () => {
+      const open = document.body.classList.toggle('sidebar-open');
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+  }
+  if (backdrop) backdrop.addEventListener('click', close);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+  window.addEventListener('resize', () => {
+    if (window.innerWidth > 768) close();
+    if (window.__leafletMap) window.__leafletMap.invalidateSize();
+  });
+})();
+
 // ── Dataset registry ───────────────────────────────────────
 const DATASETS = [
   { label: 'Seattle House Price', url: 'data/results.json',          scriptUrl: 'data/results.js',          varName: 'GeoXCPData',          yField: 'price',  yLabel: 'House Price',   yUnit: '$',  pointLabel: 'houses',   markerMinR: 4, markerMaxR: 18 },
@@ -1065,6 +1241,7 @@ const App = (() => {
     // Map: create once, then fitBounds on each load
     if (!leafletMap) {
       leafletMap = L.map('map', { zoomControl: true, attributionControl: true });
+      window.__leafletMap = leafletMap;
       L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
         attribution: '© <a href="https://www.openstreetmap.org/">OpenStreetMap</a> © <a href="https://carto.com/">CARTO</a>',
         subdomains: 'abcd', maxZoom: 19
@@ -1387,7 +1564,10 @@ const App = (() => {
     const W = el.clientWidth || 800;
     const H = el.clientHeight || 160;
 
-    const margin = { top: 10, right: 160, bottom: 30, left: 120 };
+    const isNarrow = W < 600;
+    const margin = isNarrow
+      ? { top: 8, right: 80, bottom: 26, left: 80 }
+      : { top: 10, right: 160, bottom: 30, left: 120 };
     const w = W - margin.left - margin.right;
     const h = H - margin.top - margin.bottom;
 
@@ -1533,7 +1713,10 @@ const App = (() => {
     const W = el.clientWidth || 800;
     const H = el.clientHeight || 160;
 
-    const margin = { top: 10, right: 20, bottom: 30, left: 140 };
+    const isNarrow = W < 600;
+    const margin = isNarrow
+      ? { top: 8, right: 14, bottom: 26, left: 90 }
+      : { top: 10, right: 20, bottom: 30, left: 140 };
     const w = W - margin.left - margin.right;
     const h = H - margin.top - margin.bottom;
 

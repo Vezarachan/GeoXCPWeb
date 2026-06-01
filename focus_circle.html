@@ -231,6 +231,115 @@
 
     /* ── LEAFLET CIRCLE CURSOR ── */
     .leaflet-interactive.focus-ring { cursor: move !important; }
+
+    /* ═════════════════ TABLET (≤ 1024px) ═════════════════ */
+    @media (max-width: 1024px) {
+      .focus-panel { width: 270px; }
+      .bar-row { grid-template-columns: 90px 1fr 46px; }
+    }
+
+    /* ═════════════════ MOBILE (≤ 768px) ═════════════════ */
+    @media (max-width: 768px) {
+      /* Header — wrap, smaller subtitle */
+      .header {
+        height: auto;
+        min-height: 48px;
+        padding: 8px 12px;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .header-title { font-size: 13px; }
+      .header-sub {
+        font-size: 10.5px;
+        line-height: 1.35;
+        max-width: 100%;
+      }
+      .header-right {
+        margin-left: 0;
+        flex-basis: 100%;
+        justify-content: flex-end;
+        order: 3;
+      }
+      .chip { font-size: 10.5px; padding: 2px 8px; }
+
+      /* Controls: docked at bottom edge, full-width */
+      .controls {
+        bottom: 8px;
+        left: 8px; right: 8px;
+        transform: none;
+        min-width: 0;
+        width: auto;
+        padding: 10px 12px;
+        gap: 10px;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+      .ctrl-divider { display: none; }
+      .ctrl-group { gap: 6px; }
+      .ctrl-label { font-size: 10px; }
+      input[type=range] { width: 100%; min-width: 140px; flex: 1; }
+      .toggle-btn { padding: 7px 10px; font-size: 11px; }
+
+      /* Hint */
+      .map-hint {
+        top: 10px;
+        font-size: 11px;
+        padding: 6px 12px;
+        max-width: calc(100vw - 24px);
+        text-align: center;
+      }
+
+      /* Map legend (top-right): smaller and offset to avoid focus panel */
+      .map-legend {
+        right: 8px; top: 8px;
+        padding: 7px 9px;
+        min-width: 110px;
+      }
+      .legend-title { font-size: 9.5px; }
+      .legend-labels { font-size: 9.5px; }
+
+      /* Focus panel: dock at bottom as a bottom sheet on mobile */
+      .focus-panel {
+        position: fixed;
+        left: 8px; right: 8px;
+        bottom: 8px;
+        top: auto;
+        width: auto;
+        max-height: 50vh;
+        z-index: 950;
+      }
+      .focus-panel.hidden { transform: translateY(110%); opacity: 1; }
+      .focus-panel:not(.hidden) { transform: translateY(0); }
+      .focus-panel { transition: transform 0.25s ease, opacity 0.2s; }
+
+      /* When focus panel is visible on mobile, push the controls UP */
+      body.focus-active .controls {
+        bottom: calc(50vh + 16px);
+      }
+
+      .fp-header { padding: 10px 12px; }
+      .fp-title { font-size: 13px; }
+      .fp-meta { font-size: 11px; }
+      .fp-close { width: 26px; height: 26px; font-size: 13px; }
+      .fp-legend { font-size: 10px; gap: 10px; padding: 5px 12px 6px; }
+
+      .bar-row {
+        grid-template-columns: 90px 1fr 44px;
+        padding: 4px 12px 3px;
+        min-height: 34px;
+      }
+      .bar-label { font-size: 11px; }
+      .bar-val { font-size: 11px; }
+      .bar-val-u { font-size: 10px; }
+    }
+
+    /* ═════════════════ SMALL MOBILE (≤ 420px) ═════════════════ */
+    @media (max-width: 420px) {
+      .header-title { font-size: 12px; }
+      .header-sub { display: none; }
+      .bar-row { grid-template-columns: 80px 1fr 40px; }
+      .bar-label { font-size: 10.5px; }
+    }
   </style>
 </head>
 <body>
@@ -344,6 +453,12 @@ function init() {
     subdomains: 'abcd', maxZoom: 19
   }).addTo(map);
 
+  // Handle viewport changes (rotation, resize)
+  window.addEventListener('resize', () => {
+    map.invalidateSize();
+    positionPanel();
+  });
+
   // ── color scale (income) ──
   const incomes  = data.points.map(p => p.income);
   const incomeMin = d3.quantile(incomes.slice().sort(d3.ascending), 0.02);
@@ -431,6 +546,7 @@ function placeCircle(latlng) {
   circleLayer.on('mousedown', startDrag);
 
   document.getElementById('focus-panel').classList.remove('hidden');
+  document.body.classList.add('focus-active');
   document.getElementById('chip-r').textContent = (radiusM / 1000).toFixed(1) + ' km';
 }
 
@@ -582,6 +698,14 @@ function positionPanel() {
   if (!circleLayer || !centerLatLng) return;
 
   const panel   = document.getElementById('focus-panel');
+
+  // On mobile, the panel is a bottom-sheet (CSS-positioned) — skip JS placement
+  if (window.innerWidth <= 768) {
+    panel.style.left = '';
+    panel.style.top  = '';
+    return;
+  }
+
   const mapEl   = document.getElementById('map');
   const mapRect = mapEl.getBoundingClientRect();
 
@@ -619,6 +743,7 @@ function removeCircle() {
   if (circleLayer) { map.removeLayer(circleLayer); circleLayer = null; }
   centerLatLng = null;
   document.getElementById('focus-panel').classList.add('hidden');
+  document.body.classList.remove('focus-active');
   document.getElementById('map-hint').classList.remove('hidden');
 }
 

@@ -22,3 +22,5 @@ environment.yml
 
 # OS
 .DS_Store
+desktop.ini
+Thumbs.db
